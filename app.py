@@ -647,10 +647,15 @@ def style_line(fig, n_points: int = 0):
     """라인 차트에 Sometrend 스타일 적용 — spline + 도넛 마커.
 
     n_points가 많으면 마커·spline 비활성화 (성능 보호).
+    scattergl trace는 smoothing/spline 미지원이라 linear로 fallback.
     """
     use_marker = n_points <= 100
-    use_spline = n_points <= 300
+    use_spline_global = n_points <= 300
     for trace in fig.data:
+        trace_type = (getattr(trace, 'type', '') or '')
+        is_gl = 'gl' in trace_type
+        use_spline = use_spline_global and not is_gl
+
         line_color = trace.line.color if trace.line.color else '#5B43C9'
         line_kwargs = {'width': 2.8, 'shape': 'spline' if use_spline else 'linear', 'color': line_color}
         if use_spline:
