@@ -74,6 +74,24 @@ st.markdown(
     /* 사이드바도 헤더 아래로 */
     section[data-testid="stSidebar"] {{ top: 64px !important; }}
 
+    /* 사이드바 collapse 후 다시 여는 버튼 — 헤더 아래에 항상 보이게 */
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="collapsedControl"],
+    button[data-testid="stBaseButton-headerNoPadding"] {{
+        top: 72px !important;
+        left: 12px !important;
+        z-index: 1001 !important;
+        background: white !important;
+        border: 1px solid #EDECF1 !important;
+        border-radius: 8px !important;
+        box-shadow: 0 2px 6px rgba(91, 67, 201, 0.12) !important;
+        padding: 6px !important;
+    }}
+    [data-testid="stSidebarCollapsedControl"] svg,
+    [data-testid="collapsedControl"] svg {{
+        color: {PRIMARY} !important; fill: {PRIMARY} !important;
+    }}
+
     /* 상단 진보라 헤더 — 전체 너비 fixed */
     .top-header {{
         background: linear-gradient(90deg, {PRIMARY} 0%, {PRIMARY_DARK} 100%);
