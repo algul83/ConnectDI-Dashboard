@@ -652,18 +652,15 @@ def style_line(fig, n_points: int = 0):
     use_spline = n_points <= 300
     for trace in fig.data:
         line_color = trace.line.color if trace.line.color else '#5B43C9'
-        trace.mode = 'lines+markers' if use_marker else 'lines'
-        trace.line = dict(
-            width=2.8,
-            shape='spline' if use_spline else 'linear',
-            smoothing=0.8 if use_spline else 0,
-            color=line_color,
-        )
+        line_kwargs = {'width': 2.8, 'shape': 'spline' if use_spline else 'linear', 'color': line_color}
+        if use_spline:
+            line_kwargs['smoothing'] = 0.8
+        trace_kwargs = {'mode': 'lines+markers' if use_marker else 'lines', 'line': line_kwargs}
         if use_marker:
-            trace.marker = dict(
-                size=7, color='white',
-                line=dict(width=2, color=line_color),
+            trace_kwargs['marker'] = dict(
+                size=7, color='white', line=dict(width=2, color=line_color),
             )
+        trace.update(**trace_kwargs)
     return fig
 
 
