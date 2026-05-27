@@ -162,8 +162,51 @@ def load_plus_gilbyeong(folder_id: str) -> pd.DataFrame:
     return df_all[['site', 'date', 'keyword', 'hits']].dropna(subset=['date', 'keyword'])
 
 
+CONSOLIDATED_FOLDER_ID = os.environ.get(
+    'DRIVE_FOLDER_CONSOLIDATED', '12Sq6BElubCNMClsBU3R6CxqJ0VcnprEr'
+)
+CONSOLIDATED_FILENAME = 'connectdi_consolidated.csv'
+
+
+@lru_cache(maxsize=2)
+def load_consolidated(folder_id: str) -> pd.DataFrame:
+    """주 1회 갱신되는 통합 CSV를 Drive에서 다운로드."""
+    drive = _drive_client()
+    q = (
+        f"'{folder_id}' in parents and trashed=false "
+        f"and name='{CONSOLIDATED_FILENAME}'"
+    )
+    r = drive.files().list(
+        q=q, fields="files(id,name,modifiedTime)",
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
+    files = r.get('files', [])
+    if not files:
+        return pd.DataFrame()
+    csv_text = _download_csv(drive, files[0]['id'])
+    df = pd.read_csv(io.StringIO(csv_text))
+    df.columns = [c.strip() for c in df.columns]
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
+    return df
+
+
 def load_all() -> pd.DataFrame:
-    """3개 사이트 검색 로그 통합 (전체 파일)."""
+    """검색 로그 통합 로드.
+
+    우선순위:
+    1. Drive의 통합 CSV (주 1회 갱신) — 매우 빠름
+    2. fallback: 3개 사이트 raw CSV 통합 (느림)
+    """
+    # 1. 통합 CSV 우선 시도
+    try:
+        df = load_consolidated(CONSOLIDATED_FOLDER_ID)
+        if not df.empty:
+            return df
+    except Exception as e:
+        print(f"[warn] consolidated load failed: {e}")
+
+    # 2. fallback — 기존 통합 로직
     di_folder = os.environ.get('DRIVE_FOLDER_DI_KEYWORD', '1tsEwHFoQWIIBCVNtCeNKrVjbXAiFGtXK')
     plus_folder = os.environ.get('DRIVE_FOLDER_PLUS_KEYWORD', '1rYLAKFUNYp7uAf3bNqx4bafZuf3jQDQ7')
 

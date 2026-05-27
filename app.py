@@ -427,6 +427,8 @@ st.markdown(
 )
 
 
+import re as _re
+
 EN_STOPWORDS = {
     'the', 'a', 'an', 'and', 'or', 'but', 'if', 'is', 'are', 'was', 'were',
     'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
@@ -442,16 +444,40 @@ EN_STOPWORDS = {
     'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same',
     'so', 'than', 'too', 'very', 'just', 'now', 'here', 'there',
     'then', 'once', 'also', 'because', 'while', 'until',
+    'list', 'detail', 'page', 'home', 'main', 'search', 'view', 'item',
+    'show', 'index', 'menu', 'login', 'logout',
 }
+
+KR_STOPWORDS = {
+    '의', '가', '이', '은', '는', '을', '를', '에', '와', '과', '도', '만', '에서', '에게', '한테',
+    '그', '저', '그것', '이것', '저것', '나', '너', '우리', '여기', '거기',
+    '무엇', '어떤', '무슨', '어느', '어디', '언제', '왜', '어떻게',
+    '정말', '너무', '매우', '아주', '많이', '조금', '거의', '대충', '좀', '잘', '안', '못',
+    '더', '덜', '또', '또한', '항상', '늘',
+    '그리고', '그러나', '하지만', '그래서', '따라서', '그러므로', '그래도', '그러면',
+    '있다', '없다', '한다', '된다', '했다', '됐다', '있어', '없어',
+    '하다', '되다', '이다', '아니다',
+}
+
+
+def _is_valid_keyword(kw: str) -> bool:
+    s = str(kw).strip()
+    if not s or len(s) <= 1:
+        return False
+    if not _re.search(r'[가-힣A-Za-z0-9]', s):
+        return False
+    if s in KR_STOPWORDS or s.lower() in EN_STOPWORDS:
+        return False
+    return True
 
 
 @st.cache_data(ttl=3600, show_spinner="Drive에서 검색 로그 로드 중...")
 def load_data() -> pd.DataFrame:
     df = data_loader.load_all()
     df['date'] = pd.to_datetime(df['date'])
-    # 영어 불용어 제거 (키워드 전체가 불용어인 row만 삭제)
-    kw_lower = df['keyword'].astype(str).str.strip().str.lower()
-    df = df[~kw_lower.isin(EN_STOPWORDS)].reset_index(drop=True)
+    # 정제 — 통합 CSV는 이미 적용되어 있지만, fallback 경로(3개 raw 통합)일 때 대비
+    mask = df['keyword'].apply(_is_valid_keyword)
+    df = df[mask].reset_index(drop=True)
     return df
 
 
