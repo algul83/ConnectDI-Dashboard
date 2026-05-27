@@ -805,6 +805,13 @@ def page_mention(df):
         st.warning(f"'{kw_input}' 검색 결과 없음. 다른 키워드를 시도해보세요.")
         return
 
+    # 전체 키워드별 검색 순위 (매칭 키워드 중 가장 인기 있는 것의 순위 표시)
+    keyword_totals = df.groupby('keyword')['hits'].sum().sort_values(ascending=False)
+    keyword_rank = {kw: i + 1 for i, kw in enumerate(keyword_totals.index)}
+    matched_kws = kw_df['keyword'].unique()
+    best_rank = min((keyword_rank[k] for k in matched_kws if k in keyword_rank), default=None)
+    total_keywords = len(keyword_rank)
+
     # 핵심 지표
     st.write("")
     kpi_cols = st.columns(3)
@@ -833,8 +840,13 @@ def page_mention(df):
         yoy_value = "—"
         yoy_sub = "전년 동기간 데이터 없음"
 
+    if best_rank is not None:
+        rank_sub = f"전체 {total_keywords:,}개 중 #{best_rank:,}위"
+    else:
+        rank_sub = "순위 정보 없음"
+
     items = [
-        ("총 검색량", f"{int(kw_df['hits'].sum()):,}", "전체 기간 hits 합계"),
+        ("총 검색량", f"{int(kw_df['hits'].sum()):,}", rank_sub),
         ("검색량이 가장 많았던 일자", f"{peak_date}", f"{peak_hits:,}회"),
         ("전년 동기간 대비 증감률", yoy_value, yoy_sub),
     ]
