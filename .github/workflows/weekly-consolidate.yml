@@ -1,1 +1,50 @@
+name: Weekly Consolidate CSV
+
+on:
+  schedule:
+    # 매주 월요일 06:00 KST = 일요일 21:00 UTC
+    - cron: '0 21 * * 0'
+  workflow_dispatch:  # 수동 실행도 가능
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write service account file
+        run: echo "$GCP_SA_JSON" > /tmp/service-account.json
+        env:
+          GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
+
+      - name: Run consolidate_weekly.py
+        env:
+          GOOGLE_SERVICE_ACCOUNT_FILE: /tmp/service-account.json
+          DRIVE_FOLDER_DI_KEYWORD: 1tsEwHFoQWIIBCVNtCeNKrVjbXAiFGtXK
+          DRIVE_FOLDER_PLUS_KEYWORD: 1rYLAKFUNYp7uAf3bNqx4bafZuf3jQDQ7
+          DRIVE_FOLDER_CONSOLIDATED: 12Sq6BElubCNMClsBU3R6CxqJ0VcnprEr
+        run: python consolidate_weekly.py
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/service-account.json
 
