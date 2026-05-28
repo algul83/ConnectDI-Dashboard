@@ -482,7 +482,7 @@ def load_data() -> pd.DataFrame:
 
 
 def render_top_header():
-    nav = "window.parent.location.search='?page=home'"
+    nav = f"window.parent.location.search='?page=home{_link_auth_suffix()}'"
     st.markdown(
         f'<div class="top-header">'
         f'<div class="top-logo" onclick="{nav}" style="cursor:pointer;">🔍 ConnectDI</div>'
@@ -696,6 +696,12 @@ def style_line(fig, n_points: int = 0):
 
 
 # ============== 페이지 0: 홈 화면 ==============
+def _link_auth_suffix() -> str:
+    """anchor href에 추가할 auth 토큰 query 부분. 인증 안 됐으면 빈 문자열."""
+    token = _auth_token()
+    return f"&auth={token}" if token else ""
+
+
 def page_home(df):
     """ConnectDI 홈 화면 — 전체 검색 트렌드 개요."""
     start_date, end_date, sites, kw = render_filter_bar(df)
@@ -738,7 +744,7 @@ def page_home(df):
                     total = int(pivot.loc[kw_name, 'total'])
                     kw_url = _urlquote(str(kw_name))
                     st.markdown(
-                        f'<a href="?page=mention&kw={kw_url}" target="_self" class="kw-rank-link">'
+                        f'<a href="?page=mention&kw={kw_url}{_link_auth_suffix()}" target="_self" class="kw-rank-link">'
                         f'<div class="kw-rank-card">'
                         f'<span class="kw-rank-num">#{i + 1}</span>'
                         f'<span class="kw-rank-name">{kw_name}</span>'
@@ -788,7 +794,7 @@ def page_mention(df):
         st.markdown(
             f'<div style="text-align:center;margin-top:8px;">'
             + ' '.join([
-                f'<a href="?page=mention&kw={_urlquote(str(k))}" target="_self" '
+                f'<a href="?page=mention&kw={_urlquote(str(k))}{_link_auth_suffix()}" target="_self" '
                 f'style="color:{PRIMARY};font-weight:600;padding:4px 12px;border-bottom:1px solid {PRIMARY};margin:0 6px;text-decoration:none;display:inline-block;">'
                 f'{k}</a>'
                 for k in top5.index
@@ -1064,8 +1070,24 @@ def page_period(df):
 
 
 # ============== Main ==============
+def _auth_token() -> str:
+    """app_password의 SHA-256 앞 16자리. anchor 링크 클릭으로 인한 session reset 우회용."""
+    import hashlib as _hashlib
+    try:
+        app_pw = st.secrets.get("app_password", "")
+    except Exception:
+        app_pw = os.environ.get("APP_PASSWORD", "")
+    if not app_pw:
+        return ""
+    return _hashlib.sha256(app_pw.encode()).hexdigest()[:16]
+
+
 def check_password() -> bool:
-    """Streamlit secrets의 app_password로 간단한 게이트."""
+    """Streamlit secrets의 app_password로 간단한 게이트.
+
+    anchor 링크 클릭 시 streamlit session이 reset되는 문제를 회피하기 위해
+    URL query param `auth=<token>`로도 인증 상태 유지.
+    """
     if st.session_state.get('authenticated'):
         return True
 
@@ -1077,6 +1099,12 @@ def check_password() -> bool:
 
     if not app_pw:
         # 비밀번호 설정 안 됨 → 게이트 우회 (로컬 개발용)
+        return True
+
+    # URL query param에 유효한 auth 토큰이 있으면 자동 인증
+    token = _auth_token()
+    if token and st.query_params.get('auth') == token:
+        st.session_state['authenticated'] = True
         return True
 
     st.markdown(
@@ -1094,6 +1122,8 @@ def check_password() -> bool:
         if st.button("로그인", use_container_width=True, type="primary"):
             if pwd == app_pw:
                 st.session_state['authenticated'] = True
+                # URL에 auth 토큰 추가 — anchor 링크 클릭 후에도 인증 유지
+                st.query_params['auth'] = token
                 st.rerun()
             else:
                 st.error("비밀번호가 올바르지 않습니다.")
@@ -1121,10 +1151,15 @@ def main():
         st.error("데이터를 불러오지 못했습니다.")
         return
 
+    # query param 처리 시 auth 토큰만 유지 (session reset 방지)
+    auth_param = st.query_params.get('auth')
+
     # 헤더 클릭 시 홈으로 이동 (query param 감지)
     if st.query_params.get('page') == 'home':
         st.session_state['nav_radio'] = "홈 화면"
         st.query_params.clear()
+        if auth_param:
+            st.query_params['auth'] = auth_param
     # TOP 키워드 클릭 시 검색량 분석 페이지로 + 키워드 입력 자동 설정
     if st.query_params.get('page') == 'mention':
         kw_param = st.query_params.get('kw')
@@ -1132,6 +1167,8 @@ def main():
             st.session_state['mention_kw'] = kw_param
         st.session_state['nav_radio'] = "검색량 분석"
         st.query_params.clear()
+        if auth_param:
+            st.query_params['auth'] = auth_param
 
     # 사이드바
     with st.sidebar:
