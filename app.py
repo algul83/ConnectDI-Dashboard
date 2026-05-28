@@ -468,6 +468,9 @@ def _is_valid_keyword(kw: str) -> bool:
         return False
     if s in KR_STOPWORDS or s.lower() in EN_STOPWORDS:
         return False
+    # 5자리 이하 순수 숫자는 노이즈
+    if s.isdigit() and len(s) <= 5:
+        return False
     return True
 
 

@@ -32,6 +32,9 @@ OUTPUT_FILENAME = "connectdi_consolidated.csv"
 MANUAL_MAPPING_FILENAME = "unmapped_keywords.csv"  # 사용자 수기 매핑 결과
 MAPPING_FILE = Path(__file__).parent / "drug_id_mapping.json"
 
+# 사용자가 수기 매핑 CSV에 입력할 수 있는 "삭제 표시" — 해당 키워드는 통합 CSV에서 제외됨
+DROP_MARKERS = {'매칭불가', '삭제', 'delete', 'drop', '제거', '불가', 'N/A', 'na', '-'}
+
 import re
 
 EN_STOPWORDS = {
@@ -72,7 +75,7 @@ KR_STOPWORDS = {
 
 
 def is_valid_keyword(kw: str) -> bool:
-    """1글자/특수문자/공백/한글 불용어 등 제거."""
+    """1글자/특수문자/공백/한글 불용어 등 제거. 5자리 이하 순수 숫자도 노이즈로 제거."""
     s = str(kw).strip()
     if not s:
         return False
@@ -84,6 +87,9 @@ def is_valid_keyword(kw: str) -> bool:
     if s in KR_STOPWORDS:
         return False
     if s.lower() in EN_STOPWORDS:
+        return False
+    # 5자리 이하 순수 숫자는 노이즈로 간주 (의미 있는 코드는 6자리 이상)
+    if s.isdigit() and len(s) <= 5:
         return False
     return True
 
@@ -98,8 +104,14 @@ def _drive_client():
     return build('drive', 'v3', credentials=creds)
 
 
-def download_manual_mapping(drive, folder_id: str) -> dict[str, str]:
-    """수기 매핑 CSV (unmapped_keywords.csv)를 Drive에서 다운로드. '약품명' 컬럼이 채워진 row만 사전으로 반환."""
+def download_manual_mapping(drive, folder_id: str) -> tuple[dict[str, str], set[str]]:
+    """수기 매핑 CSV (unmapped_keywords.csv)를 Drive에서 다운로드.
+
+    Returns:
+        (rename_mapping, drop_keywords)
+        - rename_mapping: 약품명으로 치환할 매핑 {keyword: 약품명}
+        - drop_keywords: '매칭불가' 등 삭제 표시된 키워드 set
+    """
     q = (
         f"'{folder_id}' in parents and trashed=false "
         f"and name='{MANUAL_MAPPING_FILENAME}'"
@@ -111,7 +123,7 @@ def download_manual_mapping(drive, folder_id: str) -> dict[str, str]:
     files = r.get('files', [])
     if not files:
         print(f"  → 수기 매핑 CSV 없음: {MANUAL_MAPPING_FILENAME}")
-        return {}
+        return {}, set()
 
     file_id = files[0]['id']
     request = drive.files().get_media(fileId=file_id, supportsAllDrives=True)
@@ -127,11 +139,23 @@ def download_manual_mapping(drive, folder_id: str) -> dict[str, str]:
     df['keyword'] = df['keyword'].astype(str).str.strip()
     if '약품명' not in df.columns:
         print(f"  → '약품명' 컬럼 없음, skip")
-        return {}
+        return {}, set()
+
     filled = df[df['약품명'].astype(str).str.strip().replace('nan', '').ne('')]
-    result = {row['keyword']: str(row['약품명']).strip() for _, row in filled.iterrows()}
-    print(f"  → 수기 매핑 {len(result):,}개 로드 ({len(df) - len(result):,}개 미채움)")
-    return result
+    rename_mapping: dict[str, str] = {}
+    drop_keywords: set[str] = set()
+    for _, row in filled.iterrows():
+        name = str(row['약품명']).strip()
+        if name.lower() in {m.lower() for m in DROP_MARKERS}:
+            drop_keywords.add(row['keyword'])
+        else:
+            rename_mapping[row['keyword']] = name
+
+    untouched = len(df) - len(rename_mapping) - len(drop_keywords)
+    print(f"  → 수기 매핑 {len(rename_mapping):,}개 (약품명 치환)")
+    print(f"  → 삭제 표시 {len(drop_keywords):,}개 (매칭불가 등 → 통합 CSV에서 제외)")
+    print(f"  → 미채움 {untouched:,}개 (기존 키워드 그대로)")
+    return rename_mapping, drop_keywords
 
 
 def upload_or_update_csv(drive, folder_id: str, filename: str, csv_text: str) -> str:
@@ -203,19 +227,27 @@ def main():
     else:
         print(f"  → 자동 매핑 파일 없음: {MAPPING_FILE}")
 
-    # 3-2. 수기 매핑 (Drive의 unmapped_keywords.csv) — 우선순위 더 높음
-    manual_mapping = download_manual_mapping(drive, OUTPUT_FOLDER_ID)
+    # 3-2. 수기 매핑 (Drive의 unmapped_keywords.csv) — 약품명 치환 + 삭제 표시
+    manual_mapping, drop_keywords = download_manual_mapping(drive, OUTPUT_FOLDER_ID)
     if manual_mapping:
         valid_mapping.update(manual_mapping)  # 수기 매핑이 자동 매핑 덮어씀
-        print(f"  → 수기 매핑 {len(manual_mapping):,}개 (자동 매핑보다 우선)")
 
-    # 3-3. 적용
-    before_kw_unique = df['keyword'].nunique()
+    # 3-3. 매핑 적용 + 삭제 표시된 키워드 제거
     df['keyword'] = df['keyword'].astype(str).str.strip()
+    if drop_keywords:
+        before_rows = len(df)
+        df = df[~df['keyword'].isin(drop_keywords)].reset_index(drop=True)
+        print(f"  → 삭제 표시된 원본 키워드 → {before_rows - len(df):,}행 제거")
+    before_kw_unique = df['keyword'].nunique()
     df['keyword'] = df['keyword'].map(lambda k: valid_mapping.get(k, k))
+    # 매핑 결과가 DROP_MARKERS 텍스트인 row도 제거 (이전 통합 CSV의 잔여 처리)
+    drop_lower = {m.lower() for m in DROP_MARKERS}
+    before_rows2 = len(df)
+    df = df[~df['keyword'].astype(str).str.strip().str.lower().isin(drop_lower)].reset_index(drop=True)
+    if before_rows2 != len(df):
+        print(f"  → 매핑 결과가 삭제 마커({len(DROP_MARKERS)}종)인 row {before_rows2 - len(df):,}행 추가 제거")
     after_kw_unique = df['keyword'].nunique()
-    print(f"  → 총 매핑 {len(valid_mapping):,}개 적용")
-    print(f"  → distinct keyword: {before_kw_unique:,} → {after_kw_unique:,}")
+    print(f"  → 매핑 적용 후 distinct keyword: {before_kw_unique:,} → {after_kw_unique:,}")
 
     # 4. Drive 업로드
     print("[4/4] Drive 업로드…")
