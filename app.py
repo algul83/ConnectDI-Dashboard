@@ -509,7 +509,10 @@ def render_top_header():
         f'<div class="top-logo" onclick="{nav}" style="cursor:pointer;">🔍 ConnectDI</div>'
         f'<div class="top-tag" onclick="{nav}" style="cursor:pointer;">검색 키워드 인사이트</div>'
         f'<div style="flex:1;"></div>'
-        f'<div style="color:rgba(255,255,255,0.85);font-size:0.85rem;">통합 대시보드</div>'
+        f'<a href="https://onesglobal-recruit.streamlit.app" target="_blank" '
+        f'style="color:white;text-decoration:none;background:rgba(255,255,255,0.18);'
+        f'padding:7px 14px;border-radius:6px;font-size:0.85rem;font-weight:600;">'
+        f'📋 채용 인사이트 ↗</a>'
         f'</div>',
         unsafe_allow_html=True,
     )
