@@ -489,6 +489,10 @@ def _is_valid_keyword(kw: str) -> bool:
     # 5자리 이하 순수 숫자는 노이즈
     if s.isdigit() and len(s) <= 5:
         return False
+    # 내부용 키워드 제외: K- 또는 DC로 시작 (대소문자 무관)
+    sl = s.lower()
+    if sl.startswith('k-') or sl.startswith('dc'):
+        return False
     return True
 
 

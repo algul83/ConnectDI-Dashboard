@@ -75,7 +75,9 @@ KR_STOPWORDS = {
 
 
 def is_valid_keyword(kw: str) -> bool:
-    """1글자/특수문자/공백/한글 불용어 등 제거. 5자리 이하 순수 숫자도 노이즈로 제거."""
+    """1글자/특수문자/공백/한글 불용어 등 제거. 5자리 이하 순수 숫자도 노이즈로 제거.
+    내부 사용 키워드(K-*, DC*)도 제거.
+    """
     s = str(kw).strip()
     if not s:
         return False
@@ -90,6 +92,10 @@ def is_valid_keyword(kw: str) -> bool:
         return False
     # 5자리 이하 순수 숫자는 노이즈로 간주 (의미 있는 코드는 6자리 이상)
     if s.isdigit() and len(s) <= 5:
+        return False
+    # 내부용 키워드 제외: K- 또는 DC로 시작 (대소문자 무관)
+    sl = s.lower()
+    if sl.startswith('k-') or sl.startswith('dc'):
         return False
     return True
 
