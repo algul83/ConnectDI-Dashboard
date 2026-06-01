@@ -204,10 +204,21 @@ def main():
 
     print(f"[{datetime.now().isoformat(timespec='seconds')}] 통합 시작")
 
-    # 1. 3개 사이트 통합 (Drive에서 다운로드)
-    print("[1/4] 3개 사이트 검색 로그 다운로드 + 통합…")
-    df = data_loader.load_all()
-    print(f"  → 통합 행수: {len(df):,}")
+    # 1. 3개 사이트 raw 데이터에서 새로 통합 (기존 통합 CSV 무시)
+    print("[1/4] 3개 사이트 raw 검색 로그 다운로드 + 새로 통합…")
+    di_folder = os.environ.get('DRIVE_FOLDER_DI_KEYWORD', '1tsEwHFoQWIIBCVNtCeNKrVjbXAiFGtXK')
+    plus_folder = os.environ.get('DRIVE_FOLDER_PLUS_KEYWORD', '1rYLAKFUNYp7uAf3bNqx4bafZuf3jQDQ7')
+    df_di = data_loader.load_connectdi_main(di_folder)
+    df_plus = data_loader.load_plus_gilbyeong(plus_folder)
+    print(f"  → DI: {len(df_di):,}행, Plus+Gilbyeong: {len(df_plus):,}행")
+    parts = [d for d in [df_di, df_plus] if not d.empty]
+    if not parts:
+        print("  [error] raw 데이터가 비어있음")
+        return
+    df = pd.concat(parts, ignore_index=True)
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
+    print(f"  → 통합 행수: {len(df):,} (최신 일자: {df['date'].max()})")
 
     # 2. 불용어/1글자/특수문자 등 정제
     print("[2/4] 키워드 정제 (불용어·1글자·특수문자·list/detail 등)…")
