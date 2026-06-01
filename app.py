@@ -503,10 +503,11 @@ def load_data() -> pd.DataFrame:
 
 
 def render_top_header():
+    nav = f"window.parent.location.search='?page=home{_link_auth_suffix()}'"
     st.markdown(
         f'<div class="top-header">'
-        f'<div class="top-logo">🔍 ConnectDI</div>'
-        f'<div class="top-tag">검색 키워드 인사이트</div>'
+        f'<div class="top-logo" onclick="{nav}" style="cursor:pointer;">🔍 ConnectDI</div>'
+        f'<div class="top-tag" onclick="{nav}" style="cursor:pointer;">검색 키워드 인사이트</div>'
         f'<div style="flex:1;"></div>'
         f'<a href="https://onesglobal-recruit.streamlit.app" target="_blank" '
         f'style="color:white;text-decoration:none;background:rgba(255,255,255,0.18);'
@@ -1177,17 +1178,31 @@ def main():
     # query param 처리 시 auth 토큰만 유지 (session reset 방지)
     auth_param = st.query_params.get('auth')
 
-    # TOP 키워드 클릭 시 키워드 자동 설정
+    # 헤더 클릭 시 홈으로 이동 (query param 감지)
+    if st.query_params.get('page') == 'home':
+        st.session_state['nav_radio'] = "홈 화면"
+        st.query_params.clear()
+        if auth_param:
+            st.query_params['auth'] = auth_param
+    # TOP 키워드 클릭 시 검색량 분석 페이지로 + 키워드 입력 자동 설정
     if st.query_params.get('page') == 'mention':
         kw_param = st.query_params.get('kw')
         if kw_param:
             st.session_state['mention_kw'] = kw_param
+        st.session_state['nav_radio'] = "검색량 분석"
         st.query_params.clear()
         if auth_param:
             st.query_params['auth'] = auth_param
 
-    # 사이드바 — 페이지가 1개라 메뉴 라디오 불필요
+    # 사이드바
     with st.sidebar:
+        page = st.radio(
+            "메뉴",
+            options=["홈 화면", "검색량 분석", "검색량 비교분석", "기간 검색량 분석"],
+            label_visibility="collapsed",
+            key="nav_radio",
+        )
+        st.divider()
         if st.button("🔄 데이터 새로고침", use_container_width=True):
             st.cache_data.clear()
             data_loader.load_connectdi_main.cache_clear()
@@ -1199,9 +1214,16 @@ def main():
     # 상단 헤더
     render_top_header()
 
-    # 페이지 콘텐츠 — 검색량 분석만
+    # 페이지 콘텐츠 (패딩 영역)
     st.markdown('<div class="page-pad">', unsafe_allow_html=True)
-    page_mention(df)
+    if page == "홈 화면":
+        page_home(df)
+    elif page == "검색량 분석":
+        page_mention(df)
+    elif page == "검색량 비교분석":
+        page_compare(df)
+    else:
+        page_period(df)
     st.markdown('</div>', unsafe_allow_html=True)
 
 
