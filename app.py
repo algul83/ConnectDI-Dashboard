@@ -1211,6 +1211,7 @@ def main():
             st.cache_data.clear()
             data_loader.load_connectdi_main.cache_clear()
             data_loader.load_plus_gilbyeong.cache_clear()
+            data_loader.load_consolidated.cache_clear()
             st.rerun()
         st.caption(f"전체 데이터: {len(df):,}행")
         st.caption(f"기간: {df['date'].min().date()} ~ {df['date'].max().date()}")
