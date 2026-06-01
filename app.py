@@ -522,9 +522,28 @@ def render_top_header():
     )
 
 
+DAYS_MAP = {"1일": 1, "1주일": 7, "1개월": 30, "3개월": 90, "6개월": 180, "12개월": 365}
+
+
 def render_filter_bar(df: pd.DataFrame):
     min_date = df['date'].min().date()
     max_date = df['date'].max().date()
+
+    # 초기 기본값 (1개월)
+    if 'start_dt' not in st.session_state:
+        st.session_state['start_dt'] = max(min_date, max_date - timedelta(days=30))
+    if 'end_dt' not in st.session_state:
+        st.session_state['end_dt'] = max_date
+
+    # 빠른 기간 라디오 선택 시 시작일/종료일을 자동 조정하는 callback
+    def _sync_dates_from_quick():
+        q = st.session_state.get('quick_period', '1개월')
+        if q == "전체":
+            st.session_state['start_dt'] = min_date
+            st.session_state['end_dt'] = max_date
+        else:
+            st.session_state['end_dt'] = max_date
+            st.session_state['start_dt'] = max(min_date, max_date - timedelta(days=DAYS_MAP[q]))
 
     st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
 
@@ -533,20 +552,17 @@ def render_filter_bar(df: pd.DataFrame):
 
     with c1[0]:
         start_dt = st.date_input(
-            "📅 시작일", value=max_date - timedelta(days=30),
+            "📅 시작일",
             min_value=min_date, max_value=max_date,
-            label_visibility="visible",
+            label_visibility="visible", key="start_dt",
         )
     with c1[1]:
-        st.markdown(
-            '<div class="dash-sep">~</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="dash-sep">~</div>', unsafe_allow_html=True)
     with c1[2]:
         end_dt = st.date_input(
-            "📅 종료일", value=max_date,
+            "📅 종료일",
             min_value=min_date, max_value=max_date,
-            label_visibility="visible",
+            label_visibility="visible", key="end_dt",
         )
     with c1[3]:
         st.write("")
@@ -556,7 +572,7 @@ def render_filter_bar(df: pd.DataFrame):
             "빠른 기간",
             options=["1일", "1주일", "1개월", "3개월", "6개월", "12개월", "전체"],
             index=2, horizontal=True, label_visibility="collapsed",
-            key="quick_period",
+            key="quick_period", on_change=_sync_dates_from_quick,
         )
     with c1[5]:
         st.markdown('<div style="margin-top:30px;"></div>', unsafe_allow_html=True)
@@ -576,18 +592,8 @@ def render_filter_bar(df: pd.DataFrame):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 적용 버튼을 눌렀을 때만 새 필터 저장
+    # 적용 버튼 누르면 date_input 현재 값으로 필터 저장
     if apply_btn:
-        if quick == "전체":
-            start_date, end_date = min_date, max_date
-        else:
-            days_map = {"1일": 1, "1주일": 7, "1개월": 30, "3개월": 90, "6개월": 180, "12개월": 365}
-            end_date = max_date
-            start_date = max(min_date, end_date - timedelta(days=days_map[quick]))
-        # 날짜 입력이 변경됐으면 그걸 우선
-        if start_dt != max_date - timedelta(days=30) or end_dt != max_date:
-            start_date, end_date = start_dt, end_dt
-
         sites = []
         if site_di: sites.append("커넥트디아이")
         if site_plus: sites.append("커넥트디아이플러스")
@@ -596,7 +602,7 @@ def render_filter_bar(df: pd.DataFrame):
             sites = ["커넥트디아이", "커넥트디아이플러스", "길병원"]
 
         st.session_state['applied_filter'] = {
-            'start_date': start_date, 'end_date': end_date,
+            'start_date': start_dt, 'end_date': end_dt,
             'sites': sites, 'keyword': '',
         }
 
