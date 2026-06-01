@@ -561,7 +561,7 @@ def render_filter_bar(df: pd.DataFrame):
             key="apply_channel", type="primary",
         )
 
-    # ROW 2: 사이트 토글 + 키워드 검색
+    # ROW 2: 사이트 토글 (키워드 검색창은 검색량 분석 메뉴에서만)
     c2 = st.columns([1.5, 1.5, 1.5, 5.5])
     with c2[0]:
         site_di = st.toggle("커넥트디아이", value=True, key="site_di")
@@ -569,12 +569,6 @@ def render_filter_bar(df: pd.DataFrame):
         site_plus = st.toggle("커넥트디아이플러스", value=True, key="site_plus")
     with c2[2]:
         site_gil = st.toggle("길병원", value=True, key="site_gil")
-    with c2[3]:
-        keyword_filter = st.text_input(
-            "키워드 검색",
-            placeholder="🔎 키워드 입력 (부분 일치, 비워두면 전체)",
-            label_visibility="collapsed", key="kw_filter",
-        )
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -599,7 +593,7 @@ def render_filter_bar(df: pd.DataFrame):
 
         st.session_state['applied_filter'] = {
             'start_date': start_date, 'end_date': end_date,
-            'sites': sites, 'keyword': keyword_filter,
+            'sites': sites, 'keyword': '',
         }
 
     # 적용된 필터 (없으면 기본값 = 최근 1개월·전체 사이트)
