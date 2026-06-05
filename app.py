@@ -1047,13 +1047,75 @@ def page_period(df):
     with r1[0]:
         with st.container(border=True):
             st.markdown('<div class="w-title">📊 주별 검색량 추이</div>', unsafe_allow_html=True)
-            weekly = fdf.groupby(['week', 'site'])['hits'].sum().reset_index()
-            fig_w = px.line(weekly, x='week', y='hits', color='site',
-                           color_discrete_map=SITE_COLORS,
-                           labels={'week': '', 'hits': '검색 수', 'site': ''})
-            style_line(fig_w)
-            st.plotly_chart(plotly_layout(fig_w, 320), use_container_width=True,
-                           config={'displayModeBar': False})
+            import plotly.graph_objects as go
+
+            # 주 시작일을 datetime으로 → plotly가 x축 자동 포맷 (날짜 라벨 짧아짐)
+            fdf_w = fdf.copy()
+            fdf_w['week_start'] = fdf_w['date'].dt.to_period('W').dt.start_time
+            weekly = (
+                fdf_w.groupby(['week_start', 'site'])['hits'].sum()
+                .reset_index().sort_values(['site', 'week_start'])
+            )
+            # 사이트별 4주 이동평균
+            weekly['ma4'] = (
+                weekly.groupby('site')['hits']
+                .transform(lambda s: s.rolling(window=4, min_periods=1).mean())
+            )
+
+            def _hex_to_rgba(hex_color, alpha=0.18):
+                h = hex_color.lstrip('#')
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                return f'rgba({r},{g},{b},{alpha})'
+
+            fig_w = go.Figure()
+            for site in weekly['site'].unique():
+                sub = weekly[weekly['site'] == site]
+                color = SITE_COLORS.get(site, PRIMARY)
+                # 영역 채움 (원량)
+                fig_w.add_trace(go.Scatter(
+                    x=sub['week_start'], y=sub['hits'],
+                    mode='lines', name=site,
+                    line=dict(color=color, width=2, shape='spline', smoothing=0.8),
+                    fill='tozeroy', fillcolor=_hex_to_rgba(color, 0.18),
+                    hovertemplate=f'<b>%{{x|%Y-%m-%d}} 주</b><br>{site} %{{y:,}}회<extra></extra>',
+                ))
+                # 4주 이동평균 (점선)
+                fig_w.add_trace(go.Scatter(
+                    x=sub['week_start'], y=sub['ma4'],
+                    mode='lines', name=f'{site} · 4주 MA',
+                    line=dict(color=color, width=1.4, dash='dash'),
+                    hovertemplate=f'<b>%{{x|%Y-%m-%d}}</b><br>{site} 4주 MA %{{y:,.0f}}<extra></extra>',
+                    opacity=0.7,
+                ))
+
+            fig_w.update_layout(
+                height=340, hovermode='x unified',
+                plot_bgcolor='white', paper_bgcolor='white',
+                margin=dict(l=10, r=10, t=30, b=10),
+                font=dict(family="Pretendard, Malgun Gothic, 맑은 고딕, sans-serif",
+                          size=12, color='#1E1B2E'),
+                legend=dict(
+                    orientation='h', yanchor='bottom', y=1.02,
+                    x=1.0, xanchor='right',
+                    bgcolor='rgba(255,255,255,0.85)',
+                    font=dict(size=10, family="Pretendard, sans-serif"),
+                    itemwidth=30,
+                ),
+                xaxis=dict(
+                    showgrid=False, showline=False, zeroline=False, title='',
+                    tickformat='%Y-%m', tickangle=0,
+                    nticks=8,
+                ),
+                yaxis=dict(
+                    showgrid=True, gridcolor='#F3F4F6',
+                    showline=False, zeroline=False, title='',
+                    separatethousands=True,
+                ),
+                hoverlabel=dict(bgcolor='white', bordercolor='#E5E5E8',
+                                font=dict(family="Pretendard, sans-serif", size=12)),
+            )
+            st.plotly_chart(fig_w, use_container_width=True,
+                            config={'displayModeBar': False})
 
     with r1[1]:
         with st.container(border=True):
