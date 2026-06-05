@@ -105,14 +105,23 @@ def load_connectdi_main(folder_id: str) -> pd.DataFrame:
 
 
 _PLUS_FILENAME_DATE = re.compile(r'(\d{4}-\d{2}-\d{2})_(플러스|길병원)_')
+# 1회성 풀-히스토리 덤프: 플러스베타_YYYYMM_YYYYMM.csv, 플러스_YYYYMM_YYYYMM.csv,
+# 길병원_YYYYMM_YYYYMM.csv — 시작/종료 월 표기. 플러스베타가 플러스를 prefix로
+# 갖기 때문에 alternation 순서 주의 (긴 토큰 먼저).
+_PLUS_FULLDUMP = re.compile(r'^(플러스베타|플러스|길병원)_\d{6}_\d{6}\.csv$')
 
 
 def _identify_plus_site(filename: str) -> str | None:
-    """파일명에서 사이트 식별. 일별 CSV + 마스터 누적 CSV 둘 다 처리."""
+    """파일명에서 사이트 식별. 일별 CSV + 마스터 누적 CSV + 1회성 풀-덤프 모두 처리.
+    플러스베타는 커넥트디아이플러스의 베타 환경 데이터로 동일 사이트로 통합."""
     # 일별 CSV: YYYY-MM-DD_플러스_... or YYYY-MM-DD_길병원_...
     m = _PLUS_FILENAME_DATE.match(filename)
     if m:
         return '커넥트디아이플러스' if m.group(2) == '플러스' else '길병원'
+    # 1회성 풀-덤프: 플러스/플러스베타/길병원_YYYYMM_YYYYMM.csv
+    m = _PLUS_FULLDUMP.match(filename)
+    if m:
+        return '길병원' if m.group(1) == '길병원' else '커넥트디아이플러스'
     # 마스터 누적 CSV
     if '커넥트디아이플러스 키워드 검색결과' in filename or '커넥트디아이플러스_키워드_검색결과' in filename:
         return '커넥트디아이플러스'
