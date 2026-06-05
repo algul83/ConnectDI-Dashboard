@@ -1036,12 +1036,74 @@ def page_period(df):
 
     with st.container(border=True):
         st.markdown('<div class="w-title">📅 월별 검색량 추이</div>', unsafe_allow_html=True)
-        monthly = fdf.groupby(['year_month', 'site'])['hits'].sum().reset_index()
-        fig_m = px.bar(monthly, x='year_month', y='hits', color='site',
-                      color_discrete_map=SITE_COLORS, barmode='group',
-                      labels={'year_month': '', 'hits': '검색 수', 'site': ''})
-        st.plotly_chart(plotly_layout(fig_m, 320), use_container_width=True,
-                      config={'displayModeBar': False})
+        import plotly.graph_objects as go
+
+        # 월 시작일을 datetime으로
+        fdf_m = fdf.copy()
+        fdf_m['month_start'] = fdf_m['date'].dt.to_period('M').dt.start_time
+        monthly = (
+            fdf_m.groupby(['month_start', 'site'])['hits'].sum()
+            .reset_index().sort_values(['site', 'month_start'])
+        )
+        # 사이트별 3개월 이동평균 (분기 추세)
+        monthly['ma3'] = (
+            monthly.groupby('site')['hits']
+            .transform(lambda s: s.rolling(window=3, min_periods=1).mean())
+        )
+
+        def _hex_to_rgba_m(hex_color, alpha=0.18):
+            h = hex_color.lstrip('#')
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            return f'rgba({r},{g},{b},{alpha})'
+
+        fig_m = go.Figure()
+        for site in monthly['site'].unique():
+            sub = monthly[monthly['site'] == site]
+            color = SITE_COLORS.get(site, PRIMARY)
+            fig_m.add_trace(go.Scatter(
+                x=sub['month_start'], y=sub['hits'],
+                mode='lines+markers', name=site,
+                line=dict(color=color, width=2.4, shape='spline', smoothing=0.8),
+                marker=dict(size=7, color='white', line=dict(width=2, color=color)),
+                fill='tozeroy', fillcolor=_hex_to_rgba_m(color, 0.18),
+                hovertemplate=f'<b>%{{x|%Y-%m}}</b><br>{site} %{{y:,}}회<extra></extra>',
+            ))
+            fig_m.add_trace(go.Scatter(
+                x=sub['month_start'], y=sub['ma3'],
+                mode='lines', name=f'{site} · 3개월 MA',
+                line=dict(color=color, width=1.4, dash='dash'),
+                hovertemplate=f'<b>%{{x|%Y-%m}}</b><br>{site} 3개월 MA %{{y:,.0f}}<extra></extra>',
+                opacity=0.7,
+            ))
+
+        fig_m.update_layout(
+            height=340, hovermode='x unified',
+            plot_bgcolor='white', paper_bgcolor='white',
+            margin=dict(l=10, r=10, t=30, b=10),
+            font=dict(family="Pretendard, Malgun Gothic, 맑은 고딕, sans-serif",
+                      size=12, color='#1E1B2E'),
+            legend=dict(
+                orientation='h', yanchor='bottom', y=1.02,
+                x=1.0, xanchor='right',
+                bgcolor='rgba(255,255,255,0.85)',
+                font=dict(size=10, family="Pretendard, sans-serif"),
+                itemwidth=30,
+            ),
+            xaxis=dict(
+                showgrid=False, showline=False, zeroline=False, title='',
+                tickformat='%Y-%m', tickangle=0,
+                dtick='M1',
+            ),
+            yaxis=dict(
+                showgrid=True, gridcolor='#F3F4F6',
+                showline=False, zeroline=False, title='',
+                separatethousands=True,
+            ),
+            hoverlabel=dict(bgcolor='white', bordercolor='#E5E5E8',
+                            font=dict(family="Pretendard, sans-serif", size=12)),
+        )
+        st.plotly_chart(fig_m, use_container_width=True,
+                        config={'displayModeBar': False})
 
     r1 = st.columns([7, 3])
     with r1[0]:
