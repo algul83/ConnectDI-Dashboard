@@ -316,13 +316,18 @@ def _find_all_sections(sections: list[dict], header_starts: str) -> list[dict]:
 
 
 def _extract_period(csv_text: str) -> tuple:
-    """CSV에서 가장 이른 `# 시작일`과 가장 늦은 `# 종료일` 추출."""
+    """CSV 헤더의 첫 `# 시작일`~`# 종료일` 추출.
+
+    Why: 파일의 진짜 대상 기간은 항상 첫 섹션 헤더에 있음. min/max로 뽑으면
+    정기 주간 파일 내부의 30일 rolling 섹션 헤더(예: 30일 전 시작일)까지 섞여서
+    정기 파일이 bulk로 오탐지됨.
+    """
     import re as _re
-    starts = _re.findall(r'#\s*시작일:\s*(\d{8})', csv_text)
-    ends = _re.findall(r'#\s*종료일:\s*(\d{8})', csv_text)
-    if not starts or not ends:
+    s_match = _re.search(r'#\s*시작일:\s*(\d{8})', csv_text)
+    e_match = _re.search(r'#\s*종료일:\s*(\d{8})', csv_text)
+    if not s_match or not e_match:
         return None, None
-    s = min(starts); e = max(ends)
+    s, e = s_match.group(1), e_match.group(1)
     from datetime import date as _date
     return (_date(int(s[:4]), int(s[4:6]), int(s[6:])),
             _date(int(e[:4]), int(e[4:6]), int(e[6:])))
