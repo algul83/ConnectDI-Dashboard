@@ -1352,90 +1352,103 @@ def _render_ga_filter_bar(hist: pd.DataFrame, key_prefix: str):
 
 
 def _render_ga_trend_charts(hist: pd.DataFrame, is_app: bool):
-    """주간 추이 차트 3개: 사용자 지표 / 채널 세션 / Stickiness."""
+    """월간 추이 차트 3개: 사용자 지표 / 채널 세션 / Stickiness."""
     if hist.empty:
         st.info("추이 데이터가 없습니다. Drive에 여러 주 CSV 필요.")
         return
 
     import plotly.graph_objects as go
 
-    st.caption(f"📈 {len(hist)}주 데이터 (기간: {hist['week_start'].min()} ~ {hist['week_start'].max()})")
+    h = hist.copy()
+    h['month'] = pd.to_datetime(h['week_start']).dt.to_period('M').dt.to_timestamp()
+    monthly = h.groupby('month').agg(
+        mau=('mau', 'mean'),
+        avg_wau=('avg_wau', 'mean'),
+        avg_dau=('avg_dau', 'mean'),
+        stickiness=('stickiness', 'mean'),
+        engagement_sec=('engagement_sec', 'mean'),
+        sessions_organic=('sessions_organic', 'sum'),
+        sessions_direct=('sessions_direct', 'sum'),
+        sessions_ai=('sessions_ai', 'sum'),
+    ).reset_index().sort_values('month')
+
+    st.caption(f"📈 {len(monthly)}개월 데이터 (기간: {monthly['month'].min().date()} ~ {monthly['month'].max().date()})")
 
     # 1. 사용자 지표 추이 (MAU / WAU / DAU)
     with st.container(border=True):
-        st.markdown('<div class="w-title">👥 사용자 지표 추이 (주간)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="w-title">👥 사용자 지표 추이 (월간)</div>', unsafe_allow_html=True)
         fig = go.Figure()
         for col, label, color in [('mau', 'MAU', '#5B43C9'),
                                     ('avg_wau', '평균 WAU', '#EA580C'),
                                     ('avg_dau', '평균 DAU', '#10B981')]:
             fig.add_trace(go.Scatter(
-                x=hist['week_start'], y=hist[col],
+                x=monthly['month'], y=monthly[col],
                 mode='lines+markers', name=label,
                 line=dict(color=color, width=2.4, shape='spline', smoothing=0.6),
                 marker=dict(size=7, color='white', line=dict(width=2, color=color)),
-                hovertemplate=f'<b>%{{x|%Y-%m-%d}}</b><br>{label}: %{{y:,}}<extra></extra>',
+                hovertemplate=f'<b>%{{x|%Y-%m}}</b><br>{label}: %{{y:,.0f}}<extra></extra>',
             ))
         fig.update_layout(
             height=320, hovermode='x unified',
             plot_bgcolor='white', paper_bgcolor='white',
             margin=dict(l=10, r=10, t=20, b=10),
             legend=dict(orientation='h', y=1.05, x=1, xanchor='right'),
-            xaxis=dict(showgrid=False, tickformat='%m/%d'),
+            xaxis=dict(showgrid=False, tickformat='%Y-%m'),
             yaxis=dict(showgrid=True, gridcolor='#F3F4F6', separatethousands=True),
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # 2. 채널 세션 추이 (Organic / Direct / AI Assistant)
     with st.container(border=True):
-        st.markdown('<div class="w-title">🌐 채널별 세션 추이 (주간)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="w-title">🌐 채널별 세션 추이 (월간)</div>', unsafe_allow_html=True)
         fig = go.Figure()
         for col, label, color in [('sessions_organic', 'Organic Search', '#10B981'),
                                     ('sessions_direct', 'Direct', '#5B43C9'),
                                     ('sessions_ai', 'AI Assistant', '#EA580C')]:
             fig.add_trace(go.Scatter(
-                x=hist['week_start'], y=hist[col],
+                x=monthly['month'], y=monthly[col],
                 mode='lines+markers', name=label,
                 stackgroup='one',
                 line=dict(color=color, width=1.5, shape='spline', smoothing=0.5),
                 marker=dict(size=5),
-                hovertemplate=f'<b>%{{x|%Y-%m-%d}}</b><br>{label}: %{{y:,}}<extra></extra>',
+                hovertemplate=f'<b>%{{x|%Y-%m}}</b><br>{label}: %{{y:,}}<extra></extra>',
             ))
         fig.update_layout(
             height=320, hovermode='x unified',
             plot_bgcolor='white', paper_bgcolor='white',
             margin=dict(l=10, r=10, t=20, b=10),
             legend=dict(orientation='h', y=1.05, x=1, xanchor='right'),
-            xaxis=dict(showgrid=False, tickformat='%m/%d'),
+            xaxis=dict(showgrid=False, tickformat='%Y-%m'),
             yaxis=dict(showgrid=True, gridcolor='#F3F4F6', separatethousands=True),
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # 3. Stickiness + 참여시간 추이 (이중축)
     with st.container(border=True):
-        st.markdown('<div class="w-title">📊 Stickiness & 참여시간 추이</div>', unsafe_allow_html=True)
+        st.markdown('<div class="w-title">📊 Stickiness & 참여시간 추이 (월간)</div>', unsafe_allow_html=True)
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=hist['week_start'], y=hist['stickiness'],
+            x=monthly['month'], y=monthly['stickiness'],
             mode='lines+markers', name='Stickiness (%)',
             line=dict(color='#5B43C9', width=2.4, shape='spline', smoothing=0.6),
             marker=dict(size=7, color='white', line=dict(width=2, color='#5B43C9')),
             yaxis='y1',
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Stickiness: %{y:.1f}%<extra></extra>',
+            hovertemplate='<b>%{x|%Y-%m}</b><br>Stickiness: %{y:.1f}%<extra></extra>',
         ))
         fig.add_trace(go.Scatter(
-            x=hist['week_start'], y=hist['engagement_sec'],
+            x=monthly['month'], y=monthly['engagement_sec'],
             mode='lines+markers', name='평균 참여시간 (초)',
             line=dict(color='#EA580C', width=2.4, shape='spline', smoothing=0.6),
             marker=dict(size=7, color='white', line=dict(width=2, color='#EA580C')),
             yaxis='y2',
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>참여시간: %{y:.1f}초<extra></extra>',
+            hovertemplate='<b>%{x|%Y-%m}</b><br>참여시간: %{y:.1f}초<extra></extra>',
         ))
         fig.update_layout(
             height=320, hovermode='x unified',
             plot_bgcolor='white', paper_bgcolor='white',
             margin=dict(l=10, r=50, t=20, b=10),
             legend=dict(orientation='h', y=1.05, x=1, xanchor='right'),
-            xaxis=dict(showgrid=False, tickformat='%m/%d'),
+            xaxis=dict(showgrid=False, tickformat='%Y-%m'),
             yaxis=dict(showgrid=True, gridcolor='#F3F4F6', title='Stickiness (%)', side='left'),
             yaxis2=dict(showgrid=False, title='참여시간 (초)', overlaying='y', side='right'),
         )
@@ -1549,7 +1562,7 @@ def page_ga(df: pd.DataFrame):
             st.info("선택 기간에 GA 데이터가 없습니다.")
 
         st.write("")
-        st.markdown(f"#### 📈 주간 추이 ({start_d} ~ {end_d}, {len(hist_filtered)}주)")
+        st.markdown(f"#### 📈 월간 추이 ({start_d} ~ {end_d})")
         _render_ga_trend_charts(hist_filtered, is_app=False)
 
     with tab_app:
@@ -1589,7 +1602,7 @@ def page_ga(df: pd.DataFrame):
             st.info("선택 기간에 GA 데이터가 없습니다.")
 
         st.write("")
-        st.markdown(f"#### 📈 주간 추이 ({start_d2} ~ {end_d2}, {len(hist_app_f)}주)")
+        st.markdown(f"#### 📈 월간 추이 ({start_d2} ~ {end_d2})")
         _render_ga_trend_charts(hist_app_f, is_app=True)
 
 
