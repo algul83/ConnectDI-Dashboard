@@ -315,6 +315,110 @@ def _find_all_sections(sections: list[dict], header_starts: str) -> list[dict]:
     return [s for s in sections if s['header'].startswith(header_starts)]
 
 
+def _extract_period(csv_text: str) -> tuple:
+    """CSV에서 가장 이른 `# 시작일`과 가장 늦은 `# 종료일` 추출."""
+    import re as _re
+    starts = _re.findall(r'#\s*시작일:\s*(\d{8})', csv_text)
+    ends = _re.findall(r'#\s*종료일:\s*(\d{8})', csv_text)
+    if not starts or not ends:
+        return None, None
+    s = min(starts); e = max(ends)
+    from datetime import date as _date
+    return (_date(int(s[:4]), int(s[4:6]), int(s[6:])),
+            _date(int(e[:4]), int(e[4:6]), int(e[6:])))
+
+
+def parse_ga_bulk_weekly(csv_text: str) -> list:
+    """넓은 기간(7일 초과) GA CSV → 주별 데이터 리스트 반환.
+
+    `N일,30일,7일,1일` (활성 사용자 추이) 섹션의 하루 단위 값을 주간으로 그룹핑.
+    다른 지표(신규 사용자 수, 참여 시간)도 하루 단위 섹션이 있으면 활용.
+    채널/국가 등 기간 요약 지표는 시계열 breakdown 없으므로 0으로 채움.
+
+    Returns: list of dict (각 원소 = 주간 row)
+    """
+    from datetime import timedelta as _td
+    from collections import defaultdict as _dd
+    start, end = _extract_period(csv_text)
+    if not start:
+        return []
+
+    sections = _parse_ga_sections(csv_text)
+
+    def _to_int(v: str) -> int:
+        try: return int(float(v))
+        except: return 0
+
+    def _to_float(v: str) -> float:
+        try: return float(v)
+        except: return 0.0
+
+    # 하루 단위 시계열 섹션들 (N일,... 형식)
+    trend = _find_section(sections, 'N일,30일')  # 활성 사용자 추이
+    daily_active = _find_section(sections, 'N일,활성 사용자')  # 단순 활성 사용자 (DAU 계열)
+    daily_new = _find_section(sections, 'N일,새 사용자')
+    daily_engage = _find_section(sections, 'N일,활성 사용자당 평균 참여')
+
+    def _row_by_offset(sec, col_idx):
+        if not sec: return {}
+        out = {}
+        for r in sec.get('rows', []):
+            if len(r) <= col_idx: continue
+            try: offset = int(r[0])
+            except: continue
+            out[offset] = r[col_idx]
+        return out
+
+    mau_by = _row_by_offset(trend, 1)   # 30일 rolling MAU
+    wau_by = _row_by_offset(trend, 2)   # 7일 rolling WAU
+    dau_by = _row_by_offset(trend, 3)   # 1일
+    active_by = _row_by_offset(daily_active, 1)
+    new_by = _row_by_offset(daily_new, 1)
+    engage_by = _row_by_offset(daily_engage, 1)
+
+    total_days = (end - start).days + 1
+    weekly = _dd(list)  # week_start -> [ {date, mau, wau, dau, active, new, engage} ]
+    for i in range(total_days):
+        d = start + _td(days=i)
+        ws = d - _td(days=d.weekday())
+        weekly[ws].append({
+            'mau': _to_int(mau_by.get(i, 0)),
+            'wau': _to_int(wau_by.get(i, 0)),
+            'dau': _to_int(dau_by.get(i, 0)),
+            'active': _to_int(active_by.get(i, 0)),
+            'new': _to_int(new_by.get(i, 0)),
+            'engage': _to_float(engage_by.get(i, 0)),
+        })
+
+    rows = []
+    for ws in sorted(weekly):
+        recs = weekly[ws]
+        n = len(recs)
+        mau = recs[-1]['mau'] or max(r['mau'] for r in recs)
+        avg_wau = int(sum(r['wau'] for r in recs) / n) if n else 0
+        # DAU 시리즈: trend의 1일 컬럼이 있으면 그것, 없으면 daily_active
+        dau_vals = [r['dau'] or r['active'] for r in recs]
+        avg_dau = int(sum(dau_vals) / len(dau_vals)) if dau_vals else 0
+        engage_vals = [r['engage'] for r in recs if r['engage']]
+        engage = round(sum(engage_vals) / len(engage_vals), 1) if engage_vals else 0.0
+        new_sum = sum(r['new'] for r in recs)
+        stickiness = round(avg_dau / mau * 100, 1) if mau else 0.0
+        rows.append({
+            'week_start': ws,
+            'file_name': f'bulk({start}~{end})',
+            'mau': mau,
+            'avg_dau': avg_dau,
+            'avg_wau': avg_wau,
+            'stickiness': stickiness,
+            'engagement_sec': engage,
+            'sessions_total': 0,
+            'sessions_organic': 0, 'sessions_direct': 0, 'sessions_ai': 0,
+            'new_total': new_sum,
+            'new_organic': 0, 'new_direct': 0, 'new_ai': 0,
+        })
+    return rows
+
+
 def parse_ga_report(csv_text: str) -> dict:
     """GA CSV → 지표 dict 반환. 웹/앱 공통."""
     sections = _parse_ga_sections(csv_text)
@@ -393,7 +497,7 @@ def load_ga_app_report() -> dict:
 
 
 @lru_cache(maxsize=4)
-def load_ga_history(folder_id: str, limit: int = 12) -> pd.DataFrame:
+def load_ga_history(folder_id: str, limit: int = 200) -> pd.DataFrame:
     """최근 N주 GA CSV들을 로드해 주간 지표 시계열 DataFrame 반환.
 
     Returns: columns = [week_start, mau, avg_dau, avg_wau, stickiness, engagement_sec,
@@ -405,12 +509,25 @@ def load_ga_history(folder_id: str, limit: int = 12) -> pd.DataFrame:
     r = drive.files().list(
         q=f"'{folder_id}' in parents and name contains '보고서_개요_' and trashed=false",
         fields="files(id,name)",
-        orderBy="name desc", pageSize=max(limit, 30),
+        orderBy="name desc", pageSize=max(limit, 100),
         supportsAllDrives=True, includeItemsFromAllDrives=True,
     ).execute()
     files = r.get('files', [])[:limit]
     rows = []
     for f in files:
+        try:
+            text = _download_csv(drive, f['id'])
+        except Exception:
+            continue
+
+        # 파일 내용의 시작일~종료일 기간으로 bulk 여부 판단 (7일 초과 = bulk)
+        s_date, e_date = _extract_period(text)
+        if s_date and e_date and (e_date - s_date).days > 7:
+            # Bulk 파일: 하루 단위 시계열을 주간으로 그룹핑해 여러 row 반환
+            rows.extend(parse_ga_bulk_weekly(text))
+            continue
+
+        # 정기 주간 파일: 파일명의 YYYYMMDD를 week_start로 사용
         m = _re.search(r'(\d{8})', f['name'])
         if not m:
             continue
@@ -419,11 +536,7 @@ def load_ga_history(folder_id: str, limit: int = 12) -> pd.DataFrame:
             week_start = pd.Timestamp(f"{yyyymmdd[:4]}-{yyyymmdd[4:6]}-{yyyymmdd[6:]}").date()
         except Exception:
             continue
-        try:
-            text = _download_csv(drive, f['id'])
-            parsed = parse_ga_report(text)
-        except Exception:
-            continue
+        parsed = parse_ga_report(text)
 
         def _ch(name: str, source_key: str) -> int:
             return next((cnt for n, cnt in parsed.get(source_key, []) if n == name), 0)
@@ -447,8 +560,12 @@ def load_ga_history(folder_id: str, limit: int = 12) -> pd.DataFrame:
         })
     if not rows:
         return pd.DataFrame()
-    df = pd.DataFrame(rows).sort_values('week_start').reset_index(drop=True)
-    return df
+    # 같은 week_start가 여러 소스에 있으면 정기 파일(bulk 아닌 것) 우선
+    df = pd.DataFrame(rows).sort_values(['week_start', 'file_name'])
+    df['is_bulk'] = df['file_name'].str.startswith('bulk(')
+    df = df.sort_values(['week_start', 'is_bulk']).drop_duplicates(
+        subset='week_start', keep='first').drop(columns='is_bulk')
+    return df.sort_values('week_start').reset_index(drop=True)
 
 
 if __name__ == "__main__":

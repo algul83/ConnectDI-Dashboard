@@ -1270,12 +1270,12 @@ def _load_ga_app_cached():
 
 
 @st.cache_data(ttl=3600, show_spinner="GA 추이 데이터 로드 중 (여러 파일)...")
-def _load_ga_history_web_cached(limit: int = 30) -> pd.DataFrame:
+def _load_ga_history_web_cached(limit: int = 200) -> pd.DataFrame:
     return data_loader.load_ga_history(data_loader.GA_WEB_FOLDER_ID, limit)
 
 
 @st.cache_data(ttl=3600, show_spinner="GA 추이 데이터 로드 중 (여러 파일)...")
-def _load_ga_history_app_cached(limit: int = 30) -> pd.DataFrame:
+def _load_ga_history_app_cached(limit: int = 200) -> pd.DataFrame:
     return data_loader.load_ga_history(data_loader.GA_APP_FOLDER_ID, limit)
 
 
@@ -1512,7 +1512,7 @@ def page_ga(df: pd.DataFrame):
 
     tab_web, tab_app = st.tabs(["🌐 ConnectDI 웹", "📱 ConnectCare 앱"])
     with tab_web:
-        hist = _load_ga_history_web_cached(30)
+        hist = _load_ga_history_web_cached(200)
         start_d, end_d = _render_ga_filter_bar(hist, key_prefix='ga_web')
         if start_d is not None:
             hist_filtered = hist[(hist['week_start'] >= start_d) & (hist['week_start'] <= end_d)]
@@ -1553,7 +1553,7 @@ def page_ga(df: pd.DataFrame):
         _render_ga_trend_charts(hist_filtered, is_app=False)
 
     with tab_app:
-        hist_app = _load_ga_history_app_cached(30)
+        hist_app = _load_ga_history_app_cached(200)
         start_d2, end_d2 = _render_ga_filter_bar(hist_app, key_prefix='ga_app')
         if start_d2 is not None:
             hist_app_f = hist_app[(hist_app['week_start'] >= start_d2) & (hist_app['week_start'] <= end_d2)]
