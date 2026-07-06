@@ -1269,6 +1269,107 @@ def _load_ga_app_cached():
     return data_loader.load_ga_app_report()
 
 
+@st.cache_data(ttl=3600, show_spinner="GA 추이 데이터 로드 중 (여러 파일)...")
+def _load_ga_history_web_cached(limit: int = 12) -> pd.DataFrame:
+    return data_loader.load_ga_history(data_loader.GA_WEB_FOLDER_ID, limit)
+
+
+@st.cache_data(ttl=3600, show_spinner="GA 추이 데이터 로드 중 (여러 파일)...")
+def _load_ga_history_app_cached(limit: int = 12) -> pd.DataFrame:
+    return data_loader.load_ga_history(data_loader.GA_APP_FOLDER_ID, limit)
+
+
+def _render_ga_trend_charts(hist: pd.DataFrame, is_app: bool):
+    """주간 추이 차트 3개: 사용자 지표 / 채널 세션 / Stickiness."""
+    if hist.empty:
+        st.info("추이 데이터가 없습니다. Drive에 여러 주 CSV 필요.")
+        return
+
+    import plotly.graph_objects as go
+
+    st.caption(f"📈 {len(hist)}주 데이터 (기간: {hist['week_start'].min()} ~ {hist['week_start'].max()})")
+
+    # 1. 사용자 지표 추이 (MAU / WAU / DAU)
+    with st.container(border=True):
+        st.markdown('<div class="w-title">👥 사용자 지표 추이 (주간)</div>', unsafe_allow_html=True)
+        fig = go.Figure()
+        for col, label, color in [('mau', 'MAU', '#5B43C9'),
+                                    ('avg_wau', '평균 WAU', '#EA580C'),
+                                    ('avg_dau', '평균 DAU', '#10B981')]:
+            fig.add_trace(go.Scatter(
+                x=hist['week_start'], y=hist[col],
+                mode='lines+markers', name=label,
+                line=dict(color=color, width=2.4, shape='spline', smoothing=0.6),
+                marker=dict(size=7, color='white', line=dict(width=2, color=color)),
+                hovertemplate=f'<b>%{{x|%Y-%m-%d}}</b><br>{label}: %{{y:,}}<extra></extra>',
+            ))
+        fig.update_layout(
+            height=320, hovermode='x unified',
+            plot_bgcolor='white', paper_bgcolor='white',
+            margin=dict(l=10, r=10, t=20, b=10),
+            legend=dict(orientation='h', y=1.05, x=1, xanchor='right'),
+            xaxis=dict(showgrid=False, tickformat='%m/%d'),
+            yaxis=dict(showgrid=True, gridcolor='#F3F4F6', separatethousands=True),
+        )
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+    # 2. 채널 세션 추이 (Organic / Direct / AI Assistant)
+    with st.container(border=True):
+        st.markdown('<div class="w-title">🌐 채널별 세션 추이 (주간)</div>', unsafe_allow_html=True)
+        fig = go.Figure()
+        for col, label, color in [('sessions_organic', 'Organic Search', '#10B981'),
+                                    ('sessions_direct', 'Direct', '#5B43C9'),
+                                    ('sessions_ai', 'AI Assistant', '#EA580C')]:
+            fig.add_trace(go.Scatter(
+                x=hist['week_start'], y=hist[col],
+                mode='lines+markers', name=label,
+                stackgroup='one',
+                line=dict(color=color, width=1.5, shape='spline', smoothing=0.5),
+                marker=dict(size=5),
+                hovertemplate=f'<b>%{{x|%Y-%m-%d}}</b><br>{label}: %{{y:,}}<extra></extra>',
+            ))
+        fig.update_layout(
+            height=320, hovermode='x unified',
+            plot_bgcolor='white', paper_bgcolor='white',
+            margin=dict(l=10, r=10, t=20, b=10),
+            legend=dict(orientation='h', y=1.05, x=1, xanchor='right'),
+            xaxis=dict(showgrid=False, tickformat='%m/%d'),
+            yaxis=dict(showgrid=True, gridcolor='#F3F4F6', separatethousands=True),
+        )
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+    # 3. Stickiness + 참여시간 추이 (이중축)
+    with st.container(border=True):
+        st.markdown('<div class="w-title">📊 Stickiness & 참여시간 추이</div>', unsafe_allow_html=True)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=hist['week_start'], y=hist['stickiness'],
+            mode='lines+markers', name='Stickiness (%)',
+            line=dict(color='#5B43C9', width=2.4, shape='spline', smoothing=0.6),
+            marker=dict(size=7, color='white', line=dict(width=2, color='#5B43C9')),
+            yaxis='y1',
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Stickiness: %{y:.1f}%<extra></extra>',
+        ))
+        fig.add_trace(go.Scatter(
+            x=hist['week_start'], y=hist['engagement_sec'],
+            mode='lines+markers', name='평균 참여시간 (초)',
+            line=dict(color='#EA580C', width=2.4, shape='spline', smoothing=0.6),
+            marker=dict(size=7, color='white', line=dict(width=2, color='#EA580C')),
+            yaxis='y2',
+            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>참여시간: %{y:.1f}초<extra></extra>',
+        ))
+        fig.update_layout(
+            height=320, hovermode='x unified',
+            plot_bgcolor='white', paper_bgcolor='white',
+            margin=dict(l=10, r=50, t=20, b=10),
+            legend=dict(orientation='h', y=1.05, x=1, xanchor='right'),
+            xaxis=dict(showgrid=False, tickformat='%m/%d'),
+            yaxis=dict(showgrid=True, gridcolor='#F3F4F6', title='Stickiness (%)', side='left'),
+            yaxis2=dict(showgrid=False, title='참여시간 (초)', overlaying='y', side='right'),
+        )
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+
 def _render_ga_kpi_grid(metrics: dict, is_app: bool):
     """공통 KPI 그리드 (5개 지표 + 채널/화면/이벤트)."""
     if not metrics:
@@ -1371,13 +1472,21 @@ def _render_ga_kpi_grid(metrics: dict, is_app: bool):
 def page_ga(df: pd.DataFrame):
     """GA 핵심 지표 대시보드 (ConnectDI 웹 + ConnectCare 앱)."""
     st.markdown("### 📊 GA 핵심 지표")
-    st.caption("Drive의 최신 `보고서_개요_YYYYMMDD.csv`를 로드해 KPI 카드로 시각화합니다. Google Analytics 사이트에서 더 상세한 분석 가능.")
+    st.caption("Drive의 최신 `보고서_개요_YYYYMMDD.csv`를 로드해 KPI + 주간 추이로 시각화합니다. 상세 분석은 Google Analytics 사이트.")
 
     tab_web, tab_app = st.tabs(["🌐 ConnectDI 웹", "📱 ConnectCare 앱"])
     with tab_web:
+        st.markdown("#### 🔷 최신 주간 KPI")
         _render_ga_kpi_grid(_load_ga_web_cached(), is_app=False)
+        st.write("")
+        st.markdown("#### 📈 주간 추이")
+        _render_ga_trend_charts(_load_ga_history_web_cached(12), is_app=False)
     with tab_app:
+        st.markdown("#### 🔷 최신 주간 KPI")
         _render_ga_kpi_grid(_load_ga_app_cached(), is_app=True)
+        st.write("")
+        st.markdown("#### 📈 주간 추이")
+        _render_ga_trend_charts(_load_ga_history_app_cached(12), is_app=True)
 
 
 # ============== Main ==============
@@ -1496,6 +1605,7 @@ def main():
             data_loader.load_plus_gilbyeong.cache_clear()
             data_loader.load_consolidated.cache_clear()
             data_loader._load_latest_ga_csv.cache_clear()
+            data_loader.load_ga_history.cache_clear()
             st.rerun()
         st.caption(f"전체 데이터: {len(df):,}행")
         st.caption(f"기간: {df['date'].min().date()} ~ {df['date'].max().date()}")

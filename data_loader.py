@@ -392,6 +392,65 @@ def load_ga_app_report() -> dict:
     return r
 
 
+@lru_cache(maxsize=4)
+def load_ga_history(folder_id: str, limit: int = 12) -> pd.DataFrame:
+    """최근 N주 GA CSV들을 로드해 주간 지표 시계열 DataFrame 반환.
+
+    Returns: columns = [week_start, mau, avg_dau, avg_wau, stickiness, engagement_sec,
+                        sessions_total, sessions_organic, sessions_direct, sessions_ai,
+                        new_total, new_organic, new_direct, new_ai, file_name]
+    """
+    import re as _re
+    drive = _drive_client()
+    r = drive.files().list(
+        q=f"'{folder_id}' in parents and name contains '보고서_개요_' and trashed=false",
+        fields="files(id,name)",
+        orderBy="name desc", pageSize=max(limit, 30),
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
+    files = r.get('files', [])[:limit]
+    rows = []
+    for f in files:
+        m = _re.search(r'(\d{8})', f['name'])
+        if not m:
+            continue
+        yyyymmdd = m.group(1)
+        try:
+            week_start = pd.Timestamp(f"{yyyymmdd[:4]}-{yyyymmdd[4:6]}-{yyyymmdd[6:]}").date()
+        except Exception:
+            continue
+        try:
+            text = _download_csv(drive, f['id'])
+            parsed = parse_ga_report(text)
+        except Exception:
+            continue
+
+        def _ch(name: str, source_key: str) -> int:
+            return next((cnt for n, cnt in parsed.get(source_key, []) if n == name), 0)
+
+        rows.append({
+            'week_start': week_start,
+            'file_name': f['name'],
+            'mau': parsed.get('mau', 0),
+            'avg_dau': parsed.get('avg_dau', 0),
+            'avg_wau': parsed.get('avg_wau', 0),
+            'stickiness': parsed.get('stickiness', 0.0),
+            'engagement_sec': parsed.get('avg_engagement_sec', 0.0),
+            'sessions_total': parsed.get('sessions_total', 0),
+            'sessions_organic': _ch('Organic Search', 'sessions_by_channel'),
+            'sessions_direct': _ch('Direct', 'sessions_by_channel'),
+            'sessions_ai': _ch('AI Assistant', 'sessions_by_channel'),
+            'new_total': parsed.get('new_total', 0),
+            'new_organic': _ch('Organic Search', 'new_by_channel'),
+            'new_direct': _ch('Direct', 'new_by_channel'),
+            'new_ai': _ch('AI Assistant', 'new_by_channel'),
+        })
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows).sort_values('week_start').reset_index(drop=True)
+    return df
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
