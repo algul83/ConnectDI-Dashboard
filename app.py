@@ -1259,6 +1259,127 @@ def page_period(df):
             st.info("선택 기간 내 신규 키워드 없음")
 
 
+@st.cache_data(ttl=3600, show_spinner="GA CSV 로드 중...")
+def _load_ga_web_cached():
+    return data_loader.load_ga_web_report()
+
+
+@st.cache_data(ttl=3600, show_spinner="GA CSV 로드 중...")
+def _load_ga_app_cached():
+    return data_loader.load_ga_app_report()
+
+
+def _render_ga_kpi_grid(metrics: dict, is_app: bool):
+    """공통 KPI 그리드 (5개 지표 + 채널/화면/이벤트)."""
+    if not metrics:
+        st.warning("GA CSV를 찾을 수 없습니다.")
+        return
+
+    st.caption(f"📄 최신 파일: `{metrics.get('file_name', '-')}`")
+
+    # 5개 핵심 KPI 카드
+    kpis = st.columns(5)
+    def _kpi(col, label, value):
+        col.markdown(
+            f'<div class="kpi-box"><div class="kpi-label">{label}</div>'
+            f'<div class="kpi-value">{value}</div></div>',
+            unsafe_allow_html=True,
+        )
+    _kpi(kpis[0], "MAU", f"{metrics.get('mau', 0):,}")
+    _kpi(kpis[1], "평균 WAU", f"{metrics.get('avg_wau', 0):,}")
+    _kpi(kpis[2], "평균 DAU", f"{metrics.get('avg_dau', 0):,}")
+    _kpi(kpis[3], "Stickiness", f"{metrics.get('stickiness', 0):.1f}%")
+    _kpi(kpis[4], "평균 참여시간", f"{metrics.get('avg_engagement_sec', 0):.1f}초")
+
+    st.write("")
+
+    # 채널 (세션수) + 신규 유입 채널
+    ch_cols = st.columns(2)
+    with ch_cols[0]:
+        with st.container(border=True):
+            st.markdown('<div class="w-title">🌐 채널 (세션수)</div>', unsafe_allow_html=True)
+            sess = metrics.get('sessions_by_channel', [])
+            total = metrics.get('sessions_total', 0)
+            if sess:
+                for name, cnt in sess[:6]:
+                    pct = cnt / total * 100 if total else 0
+                    st.markdown(f"- **{name}**: {cnt:,} ({pct:.1f}%)")
+            else:
+                st.caption("데이터 없음")
+    with ch_cols[1]:
+        with st.container(border=True):
+            st.markdown('<div class="w-title">🆕 신규 사용자 유입 채널</div>', unsafe_allow_html=True)
+            new_ch = metrics.get('new_by_channel', [])
+            total_new = metrics.get('new_total', 0)
+            if new_ch:
+                for name, cnt in new_ch[:6]:
+                    pct = cnt / total_new * 100 if total_new else 0
+                    st.markdown(f"- **{name}**: {cnt:,} ({pct:.1f}%)")
+            else:
+                st.caption("데이터 없음")
+
+    # TOP 페이지/화면 + TOP 이벤트
+    tt_cols = st.columns(2)
+    with tt_cols[0]:
+        with st.container(border=True):
+            title = "🔥 TOP 화면" if is_app else "🔥 TOP 페이지 (조회수)"
+            st.markdown(f'<div class="w-title">{title}</div>', unsafe_allow_html=True)
+            pages = metrics.get('top_pages', [])
+            if pages:
+                for name, cnt in pages[:9]:
+                    st.markdown(f"- **{name[:60]}**: {cnt:,}")
+            else:
+                st.caption("데이터 없음")
+    with tt_cols[1]:
+        with st.container(border=True):
+            st.markdown('<div class="w-title">📊 TOP 이벤트</div>', unsafe_allow_html=True)
+            events = metrics.get('top_events', [])
+            if events:
+                for name, cnt in events[:10]:
+                    st.markdown(f"- **{name}**: {cnt:,}")
+            else:
+                st.caption("데이터 없음")
+
+    # 플랫폼 (앱 전용) + 국가 (웹 우선)
+    extra_cols = st.columns(2)
+    with extra_cols[0]:
+        with st.container(border=True):
+            if is_app:
+                st.markdown('<div class="w-title">📲 플랫폼</div>', unsafe_allow_html=True)
+                platforms = metrics.get('platforms', [])
+                if platforms:
+                    for name, cnt in platforms:
+                        st.markdown(f"- **{name}**: {cnt:,}")
+                else:
+                    st.caption("데이터 없음")
+            else:
+                st.markdown('<div class="w-title">🌏 TOP 국가</div>', unsafe_allow_html=True)
+                cs = metrics.get('top_countries', [])
+                if cs:
+                    for name, cnt in cs:
+                        st.markdown(f"- **{name}**: {cnt:,}")
+                else:
+                    st.caption("데이터 없음")
+    with extra_cols[1]:
+        with st.container(border=True):
+            st.markdown('<div class="w-title">👥 지표 요약</div>', unsafe_allow_html=True)
+            st.markdown(f"- 신규 사용자 합계: **{metrics.get('new_total', 0):,}명**")
+            st.markdown(f"- 총 세션: **{metrics.get('sessions_total', 0):,}회**")
+            st.markdown(f"- 파싱 섹션 수: **{metrics.get('raw_sections_count', 0)}개**")
+
+
+def page_ga(df: pd.DataFrame):
+    """GA 핵심 지표 대시보드 (ConnectDI 웹 + ConnectCare 앱)."""
+    st.markdown("### 📊 GA 핵심 지표")
+    st.caption("Drive의 최신 `보고서_개요_YYYYMMDD.csv`를 로드해 KPI 카드로 시각화합니다. Google Analytics 사이트에서 더 상세한 분석 가능.")
+
+    tab_web, tab_app = st.tabs(["🌐 ConnectDI 웹", "📱 ConnectCare 앱"])
+    with tab_web:
+        _render_ga_kpi_grid(_load_ga_web_cached(), is_app=False)
+    with tab_app:
+        _render_ga_kpi_grid(_load_ga_app_cached(), is_app=True)
+
+
 # ============== Main ==============
 def _auth_token() -> str:
     """app_password의 SHA-256 앞 16자리. anchor 링크 클릭으로 인한 session reset 우회용."""
@@ -1364,7 +1485,7 @@ def main():
     with st.sidebar:
         page = st.radio(
             "메뉴",
-            options=["홈 화면", "검색량 분석", "검색량 비교분석", "기간 검색량 분석"],
+            options=["홈 화면", "검색량 분석", "검색량 비교분석", "기간 검색량 분석", "GA 핵심 지표"],
             label_visibility="collapsed",
             key="nav_radio",
         )
@@ -1374,6 +1495,7 @@ def main():
             data_loader.load_connectdi_main.cache_clear()
             data_loader.load_plus_gilbyeong.cache_clear()
             data_loader.load_consolidated.cache_clear()
+            data_loader._load_latest_ga_csv.cache_clear()
             st.rerun()
         st.caption(f"전체 데이터: {len(df):,}행")
         st.caption(f"기간: {df['date'].min().date()} ~ {df['date'].max().date()}")
@@ -1389,6 +1511,8 @@ def main():
         page_mention(df)
     elif page == "검색량 비교분석":
         page_compare(df)
+    elif page == "GA 핵심 지표":
+        page_ga(df)
     else:
         page_period(df)
     st.markdown('</div>', unsafe_allow_html=True)

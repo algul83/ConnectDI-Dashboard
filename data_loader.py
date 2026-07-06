@@ -260,6 +260,138 @@ def load_all() -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
+GA_WEB_FOLDER_ID = '1PId0m0Koq-HC5JtmofyNyCCJ-fiporEP'   # ConnectDI 웹 GA
+GA_APP_FOLDER_ID = '1-slUrf0Juh5P4QJofqC1nXwSvp7zJGaf'   # ConnectCare 앱 GA
+
+
+@lru_cache(maxsize=4)
+def _load_latest_ga_csv(folder_id: str) -> tuple[str, str]:
+    """폴더에서 최신 보고서_개요_YYYYMMDD.csv 다운로드. (파일명, 텍스트) 반환."""
+    drive = _drive_client()
+    r = drive.files().list(
+        q=f"'{folder_id}' in parents and name contains '보고서_개요_' and trashed=false",
+        fields="files(id,name)",
+        orderBy="name desc", pageSize=1,
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
+    files = r.get('files', [])
+    if not files:
+        return '', ''
+    return files[0]['name'], _download_csv(drive, files[0]['id'])
+
+
+def _parse_ga_sections(csv_text: str) -> list[dict]:
+    """GA CSV를 섹션별로 파싱. 각 섹션: {header: str, rows: list[list[str]]}."""
+    sections = []
+    current = None
+    for line in csv_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith('#'):
+            if current and current.get('header') and current.get('rows'):
+                sections.append(current)
+                current = None
+            continue
+        if current is None:
+            current = {'header': line, 'rows': []}
+        elif current['header'] is None:
+            current['header'] = line
+        else:
+            current['rows'].append([c.strip() for c in line.split(',')])
+    if current and current.get('header') and current.get('rows'):
+        sections.append(current)
+    return sections
+
+
+def _find_section(sections: list[dict], header_starts: str) -> dict | None:
+    for s in sections:
+        if s['header'].startswith(header_starts):
+            return s
+    return None
+
+
+def _find_all_sections(sections: list[dict], header_starts: str) -> list[dict]:
+    return [s for s in sections if s['header'].startswith(header_starts)]
+
+
+def parse_ga_report(csv_text: str) -> dict:
+    """GA CSV → 지표 dict 반환. 웹/앱 공통."""
+    sections = _parse_ga_sections(csv_text)
+    result = {'raw_sections_count': len(sections)}
+
+    # 활성 사용자 추이: N일,30일,7일,1일 (또는 유사)
+    trend = _find_section(sections, 'N일,30일')
+    if trend:
+        rows = [[float(v) if v.replace('.','').replace('-','').isdigit() else 0 for v in r] for r in trend.get('rows', [])]
+        if rows:
+            # 마지막 유효 row의 30일 컬럼 (index 1)이 MAU
+            result['mau'] = int(rows[-1][1]) if len(rows[-1]) > 1 else 0
+            result['avg_wau'] = int(sum(r[2] for r in rows) / len(rows)) if len(rows[0]) > 2 else 0
+            result['avg_dau'] = int(sum(r[3] for r in rows) / len(rows)) if len(rows[0]) > 3 else 0
+            result['stickiness'] = round(result['avg_dau'] / result['mau'] * 100, 1) if result.get('mau') else 0.0
+
+    # 활성 사용자당 평균 참여 시간: N일 별 값 평균
+    engage = _find_section(sections, 'N일,활성 사용자당 평균 참여 시간')
+    if engage:
+        vals = [float(r[1]) for r in engage['rows'] if len(r) > 1 and r[1].replace('.','').replace('-','').isdigit()]
+        result['avg_engagement_sec'] = round(sum(vals) / len(vals), 1) if vals else 0.0
+
+    # 신규 사용자 채널 (기본 채널 그룹)
+    new_ch = _find_section(sections, '신규 사용자 기본 채널 그룹')
+    if new_ch:
+        result['new_by_channel'] = [(r[0], int(r[1])) for r in new_ch['rows'] if len(r) > 1 and r[1].isdigit()]
+        result['new_total'] = sum(n for _, n in result['new_by_channel'])
+
+    # 세션 채널
+    sess_ch = _find_section(sections, '세션 기본 채널 그룹')
+    if sess_ch:
+        result['sessions_by_channel'] = [(r[0], int(r[1])) for r in sess_ch['rows'] if len(r) > 1 and r[1].isdigit()]
+        result['sessions_total'] = sum(n for _, n in result['sessions_by_channel'])
+
+    # 국가 (활성 사용자, ID가 아닌 국가명)
+    countries = _find_all_sections(sections, '국가,활성 사용자')
+    if countries:
+        result['top_countries'] = [(r[0], int(r[1])) for r in countries[0]['rows'][:10] if len(r) > 1 and r[1].isdigit()]
+
+    # TOP 페이지/화면
+    pages = _find_section(sections, '페이지 제목 및 화면 클래스')
+    if pages:
+        result['top_pages'] = [(r[0], int(r[1])) for r in pages['rows'][:9] if len(r) > 1 and r[1].isdigit()]
+
+    # TOP 이벤트
+    events = _find_section(sections, '이벤트 이름,이벤트 수')
+    if events:
+        result['top_events'] = [(r[0], int(r[1])) for r in events['rows'][:10] if len(r) > 1 and r[1].isdigit()]
+
+    # 플랫폼 (앱만) — 플랫폼,주요 이벤트 또는 플랫폼,활성 사용자
+    platforms = _find_section(sections, '플랫폼,')
+    if platforms:
+        result['platforms'] = [(r[0], int(r[1])) for r in platforms['rows'] if len(r) > 1 and r[1].isdigit()]
+
+    return result
+
+
+def load_ga_web_report() -> dict:
+    """ConnectDI 웹 GA 최신 리포트 파싱."""
+    name, text = _load_latest_ga_csv(GA_WEB_FOLDER_ID)
+    if not text:
+        return {}
+    r = parse_ga_report(text)
+    r['file_name'] = name
+    return r
+
+
+def load_ga_app_report() -> dict:
+    """ConnectCare 앱 GA 최신 리포트 파싱."""
+    name, text = _load_latest_ga_csv(GA_APP_FOLDER_ID)
+    if not text:
+        return {}
+    r = parse_ga_report(text)
+    r['file_name'] = name
+    return r
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
