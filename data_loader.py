@@ -39,7 +39,12 @@ def _drive_client():
 
 
 def _list_files(drive, folder_id: str, name_contains: str = "") -> list[dict]:
-    q = f"'{folder_id}' in parents and trashed=false and mimeType='text/csv'"
+    # gzip으로 저장된 CSV도 포함 (stat routine이 일부 파일을 gzip으로 업로드)
+    q = (
+        f"'{folder_id}' in parents and trashed=false "
+        f"and (mimeType='text/csv' or mimeType='application/gzip' "
+        f"or mimeType='application/x-gzip')"
+    )
     if name_contains:
         q += f" and name contains '{name_contains}'"
     r = drive.files().list(
@@ -58,6 +63,31 @@ def _download_csv(drive, file_id: str) -> str:
     while not done:
         _, done = downloader.next_chunk()
     raw = buf.getvalue()
+    # gzip 매직 바이트 자동 감지 → 압축 해제
+    if raw[:2] == b'\x1f\x8b':
+        import gzip
+        try:
+            raw = gzip.decompress(raw)
+        except Exception:
+            # CRC 실패 등 손상된 gzip은 raw deflate로 관대하게 파싱 (뒷부분 손실 감수)
+            import zlib, struct
+            flg = raw[3]
+            pos = 10
+            if flg & 4:  # FEXTRA
+                xlen = struct.unpack('<H', raw[pos:pos+2])[0]
+                pos += 2 + xlen
+            if flg & 8:  # FNAME (null-terminated)
+                while pos < len(raw) and raw[pos] != 0:
+                    pos += 1
+                pos += 1
+            if flg & 16:  # FCOMMENT
+                while pos < len(raw) and raw[pos] != 0:
+                    pos += 1
+                pos += 1
+            if flg & 2:  # FHCRC
+                pos += 2
+            decomp = zlib.decompressobj(-zlib.MAX_WBITS)
+            raw = decomp.decompress(raw[pos:-8]) + decomp.flush()
     for encoding in ('utf-8-sig', 'utf-8', 'cp949'):
         try:
             return raw.decode(encoding)
@@ -147,7 +177,8 @@ def load_plus_gilbyeong(folder_id: str) -> pd.DataFrame:
             continue
         try:
             csv_text = _download_csv(drive, f['id'])
-            df = pd.read_csv(io.StringIO(csv_text))
+            # 손상된 CSV(gzip 파일 뒷부분 이슈 등)도 앞부분은 파싱 시도
+            df = pd.read_csv(io.StringIO(csv_text), on_bad_lines='skip')
         except Exception as e:
             print(f"  [skip] {f['name']}: {e}")
             continue
