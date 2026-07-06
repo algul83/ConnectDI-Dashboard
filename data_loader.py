@@ -104,7 +104,7 @@ def load_connectdi_main(folder_id: str) -> pd.DataFrame:
     return df_all[['site', 'date', 'keyword', 'hits']].dropna(subset=['date', 'keyword'])
 
 
-_PLUS_FILENAME_DATE = re.compile(r'(\d{4}-\d{2}-\d{2})_(플러스|길병원)_')
+_PLUS_FILENAME_DATE = re.compile(r'(\d{4}-\d{2}-\d{2})(?:_\d{4}-\d{2}-\d{2})?_(플러스|길병원)_')
 # 1회성 풀-히스토리 덤프: 플러스베타_YYYYMM_YYYYMM.csv, 플러스_YYYYMM_YYYYMM.csv,
 # 길병원_YYYYMM_YYYYMM.csv — 시작/종료 월 표기. 플러스베타가 플러스를 prefix로
 # 갖기 때문에 alternation 순서 주의 (긴 토큰 먼저).
