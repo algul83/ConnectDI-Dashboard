@@ -97,7 +97,8 @@ def load_connectdi_main(folder_id: str) -> pd.DataFrame:
     # Id 기준 dedup (누적 CSV라 중복 많음)
     df_all = df_all.drop_duplicates(subset=['Id'], keep='last')
 
-    df_all['Created at'] = pd.to_datetime(df_all['Created at'], errors='coerce', utc=True)
+    # 파일마다 timestamp 형식이 다름 (구형 `+0900`, 신형 `UTC`) → format='mixed'로 두 형식 모두 파싱
+    df_all['Created at'] = pd.to_datetime(df_all['Created at'], format='mixed', errors='coerce', utc=True)
     df_all['date'] = df_all['Created at'].dt.tz_convert('Asia/Seoul').dt.date
     df_all['site'] = '커넥트디아이'
     df_all = df_all.rename(columns={'Search terms': 'keyword', 'Search hit': 'hits'})
