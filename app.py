@@ -1491,54 +1491,18 @@ def _render_ga_kpi_grid(metrics: dict, is_app: bool):
             else:
                 st.caption("데이터 없음")
 
-    # TOP 페이지/화면 + TOP 이벤트
-    tt_cols = st.columns(2)
-    with tt_cols[0]:
+    # 앱 전용: 플랫폼 (Android/iOS)
+    if is_app:
         with st.container(border=True):
-            title = "🔥 TOP 화면" if is_app else "🔥 TOP 페이지 (조회수)"
-            st.markdown(f'<div class="w-title">{title}</div>', unsafe_allow_html=True)
-            pages = metrics.get('top_pages', [])
-            if pages:
-                for name, cnt in pages[:9]:
-                    st.markdown(f"- **{name[:60]}**: {cnt:,}")
+            st.markdown('<div class="w-title">📲 플랫폼</div>', unsafe_allow_html=True)
+            platforms = metrics.get('platforms', [])
+            if platforms:
+                total_p = sum(c for _, c in platforms)
+                for name, cnt in platforms:
+                    pct = cnt / total_p * 100 if total_p else 0
+                    st.markdown(f"- **{name}**: {cnt:,} ({pct:.1f}%)")
             else:
                 st.caption("데이터 없음")
-    with tt_cols[1]:
-        with st.container(border=True):
-            st.markdown('<div class="w-title">📊 TOP 이벤트</div>', unsafe_allow_html=True)
-            events = metrics.get('top_events', [])
-            if events:
-                for name, cnt in events[:10]:
-                    st.markdown(f"- **{name}**: {cnt:,}")
-            else:
-                st.caption("데이터 없음")
-
-    # 플랫폼 (앱 전용) + 국가 (웹 우선)
-    extra_cols = st.columns(2)
-    with extra_cols[0]:
-        with st.container(border=True):
-            if is_app:
-                st.markdown('<div class="w-title">📲 플랫폼</div>', unsafe_allow_html=True)
-                platforms = metrics.get('platforms', [])
-                if platforms:
-                    for name, cnt in platforms:
-                        st.markdown(f"- **{name}**: {cnt:,}")
-                else:
-                    st.caption("데이터 없음")
-            else:
-                st.markdown('<div class="w-title">🌏 TOP 국가</div>', unsafe_allow_html=True)
-                cs = metrics.get('top_countries', [])
-                if cs:
-                    for name, cnt in cs:
-                        st.markdown(f"- **{name}**: {cnt:,}")
-                else:
-                    st.caption("데이터 없음")
-    with extra_cols[1]:
-        with st.container(border=True):
-            st.markdown('<div class="w-title">👥 지표 요약</div>', unsafe_allow_html=True)
-            st.markdown(f"- 신규 사용자 합계: **{metrics.get('new_total', 0):,}명**")
-            st.markdown(f"- 총 세션: **{metrics.get('sessions_total', 0):,}회**")
-            st.markdown(f"- 파싱 섹션 수: **{metrics.get('raw_sections_count', 0)}개**")
 
 
 def page_ga(df: pd.DataFrame):
