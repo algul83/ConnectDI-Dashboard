@@ -1270,13 +1270,85 @@ def _load_ga_app_cached():
 
 
 @st.cache_data(ttl=3600, show_spinner="GA 추이 데이터 로드 중 (여러 파일)...")
-def _load_ga_history_web_cached(limit: int = 12) -> pd.DataFrame:
+def _load_ga_history_web_cached(limit: int = 30) -> pd.DataFrame:
     return data_loader.load_ga_history(data_loader.GA_WEB_FOLDER_ID, limit)
 
 
 @st.cache_data(ttl=3600, show_spinner="GA 추이 데이터 로드 중 (여러 파일)...")
-def _load_ga_history_app_cached(limit: int = 12) -> pd.DataFrame:
+def _load_ga_history_app_cached(limit: int = 30) -> pd.DataFrame:
     return data_loader.load_ga_history(data_loader.GA_APP_FOLDER_ID, limit)
+
+
+GA_QUICK_DAYS = {"1개월": 30, "3개월": 90, "6개월": 180, "12개월": 365}
+
+
+def _render_ga_filter_bar(hist: pd.DataFrame, key_prefix: str):
+    """GA 페이지 전용 기간 필터. hist의 week_start 범위 안에서 선택.
+
+    Returns: (start_date, end_date) — 적용된 기간
+    """
+    if hist.empty:
+        return None, None
+
+    min_date = hist['week_start'].min()
+    max_date = hist['week_start'].max()
+
+    sk_start = f'{key_prefix}_start_dt'
+    sk_end = f'{key_prefix}_end_dt'
+    sk_quick = f'{key_prefix}_quick_period'
+    sk_applied = f'{key_prefix}_applied'
+
+    if sk_start not in st.session_state:
+        st.session_state[sk_start] = max(min_date, max_date - timedelta(days=90))
+    if sk_end not in st.session_state:
+        st.session_state[sk_end] = max_date
+
+    def _sync():
+        q = st.session_state.get(sk_quick, '3개월')
+        if q == "전체":
+            st.session_state[sk_start] = min_date
+            st.session_state[sk_end] = max_date
+        else:
+            st.session_state[sk_end] = max_date
+            st.session_state[sk_start] = max(min_date, max_date - timedelta(days=GA_QUICK_DAYS[q]))
+
+    st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
+    c = st.columns([1.6, 0.3, 1.6, 0.3, 6.5, 0.7])
+    with c[0]:
+        st.date_input("📅 시작일", min_value=min_date, max_value=max_date,
+                       label_visibility="visible", key=sk_start)
+    with c[1]:
+        st.markdown('<div class="dash-sep">~</div>', unsafe_allow_html=True)
+    with c[2]:
+        st.date_input("📅 종료일", min_value=min_date, max_value=max_date,
+                       label_visibility="visible", key=sk_end)
+    with c[3]:
+        st.write("")
+    with c[4]:
+        st.markdown('<div style="margin-top:26px;"></div>', unsafe_allow_html=True)
+        st.radio("빠른 기간",
+                  options=["1개월", "3개월", "6개월", "12개월", "전체"],
+                  index=1, horizontal=True, label_visibility="collapsed",
+                  key=sk_quick, on_change=_sync)
+    with c[5]:
+        st.markdown('<div style="margin-top:30px;"></div>', unsafe_allow_html=True)
+        apply_btn = st.button("적용", use_container_width=True,
+                                key=f'{key_prefix}_apply_btn', type="primary")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if apply_btn:
+        st.session_state[sk_applied] = {
+            'start_date': st.session_state[sk_start],
+            'end_date': st.session_state[sk_end],
+        }
+
+    if sk_applied not in st.session_state:
+        st.session_state[sk_applied] = {
+            'start_date': max(min_date, max_date - timedelta(days=90)),
+            'end_date': max_date,
+        }
+    f = st.session_state[sk_applied]
+    return f['start_date'], f['end_date']
 
 
 def _render_ga_trend_charts(hist: pd.DataFrame, is_app: bool):
@@ -1472,21 +1544,89 @@ def _render_ga_kpi_grid(metrics: dict, is_app: bool):
 def page_ga(df: pd.DataFrame):
     """GA 핵심 지표 대시보드 (ConnectDI 웹 + ConnectCare 앱)."""
     st.markdown("### 📊 GA 핵심 지표")
-    st.caption("Drive의 최신 `보고서_개요_YYYYMMDD.csv`를 로드해 KPI + 주간 추이로 시각화합니다. 상세 분석은 Google Analytics 사이트.")
+    st.caption("Drive `보고서_개요_YYYYMMDD.csv` 파싱. 상세 분석은 Google Analytics 사이트에서.")
 
     tab_web, tab_app = st.tabs(["🌐 ConnectDI 웹", "📱 ConnectCare 앱"])
     with tab_web:
-        st.markdown("#### 🔷 최신 주간 KPI")
-        _render_ga_kpi_grid(_load_ga_web_cached(), is_app=False)
+        hist = _load_ga_history_web_cached(30)
+        start_d, end_d = _render_ga_filter_bar(hist, key_prefix='ga_web')
+        if start_d is not None:
+            hist_filtered = hist[(hist['week_start'] >= start_d) & (hist['week_start'] <= end_d)]
+        else:
+            hist_filtered = hist
+
         st.write("")
-        st.markdown("#### 📈 주간 추이")
-        _render_ga_trend_charts(_load_ga_history_web_cached(12), is_app=False)
+        st.markdown("#### 🔷 최신 주간 KPI (기간 내 마지막 주)")
+        if not hist_filtered.empty:
+            last_row = hist_filtered.iloc[-1]
+            latest = _load_ga_web_cached()
+            # 필터된 기간의 마지막 주가 최신과 다르면 그 주 CSV를 새로 로드해서 KPI 채우기
+            if str(last_row['file_name']) != latest.get('file_name'):
+                st.caption(f"⏱ 기간 내 마지막 주: {last_row['week_start']} ({last_row['file_name']})")
+            _render_ga_kpi_grid(latest if str(last_row['file_name']) == latest.get('file_name') else {
+                'file_name': last_row['file_name'],
+                'mau': int(last_row['mau']), 'avg_dau': int(last_row['avg_dau']),
+                'avg_wau': int(last_row['avg_wau']), 'stickiness': float(last_row['stickiness']),
+                'avg_engagement_sec': float(last_row['engagement_sec']),
+                'sessions_total': int(last_row['sessions_total']),
+                'sessions_by_channel': [
+                    ('Organic Search', int(last_row['sessions_organic'])),
+                    ('Direct', int(last_row['sessions_direct'])),
+                    ('AI Assistant', int(last_row['sessions_ai'])),
+                ],
+                'new_total': int(last_row['new_total']),
+                'new_by_channel': [
+                    ('Organic Search', int(last_row['new_organic'])),
+                    ('Direct', int(last_row['new_direct'])),
+                    ('AI Assistant', int(last_row['new_ai'])),
+                ],
+            }, is_app=False)
+        else:
+            st.info("선택 기간에 GA 데이터가 없습니다.")
+
+        st.write("")
+        st.markdown(f"#### 📈 주간 추이 ({start_d} ~ {end_d}, {len(hist_filtered)}주)")
+        _render_ga_trend_charts(hist_filtered, is_app=False)
+
     with tab_app:
-        st.markdown("#### 🔷 최신 주간 KPI")
-        _render_ga_kpi_grid(_load_ga_app_cached(), is_app=True)
+        hist_app = _load_ga_history_app_cached(30)
+        start_d2, end_d2 = _render_ga_filter_bar(hist_app, key_prefix='ga_app')
+        if start_d2 is not None:
+            hist_app_f = hist_app[(hist_app['week_start'] >= start_d2) & (hist_app['week_start'] <= end_d2)]
+        else:
+            hist_app_f = hist_app
+
         st.write("")
-        st.markdown("#### 📈 주간 추이")
-        _render_ga_trend_charts(_load_ga_history_app_cached(12), is_app=True)
+        st.markdown("#### 🔷 최신 주간 KPI (기간 내 마지막 주)")
+        if not hist_app_f.empty:
+            last_row = hist_app_f.iloc[-1]
+            latest = _load_ga_app_cached()
+            if str(last_row['file_name']) != latest.get('file_name'):
+                st.caption(f"⏱ 기간 내 마지막 주: {last_row['week_start']} ({last_row['file_name']})")
+            _render_ga_kpi_grid(latest if str(last_row['file_name']) == latest.get('file_name') else {
+                'file_name': last_row['file_name'],
+                'mau': int(last_row['mau']), 'avg_dau': int(last_row['avg_dau']),
+                'avg_wau': int(last_row['avg_wau']), 'stickiness': float(last_row['stickiness']),
+                'avg_engagement_sec': float(last_row['engagement_sec']),
+                'sessions_total': int(last_row['sessions_total']),
+                'sessions_by_channel': [
+                    ('Organic Search', int(last_row['sessions_organic'])),
+                    ('Direct', int(last_row['sessions_direct'])),
+                    ('AI Assistant', int(last_row['sessions_ai'])),
+                ],
+                'new_total': int(last_row['new_total']),
+                'new_by_channel': [
+                    ('Organic Search', int(last_row['new_organic'])),
+                    ('Direct', int(last_row['new_direct'])),
+                    ('AI Assistant', int(last_row['new_ai'])),
+                ],
+            }, is_app=True)
+        else:
+            st.info("선택 기간에 GA 데이터가 없습니다.")
+
+        st.write("")
+        st.markdown(f"#### 📈 주간 추이 ({start_d2} ~ {end_d2}, {len(hist_app_f)}주)")
+        _render_ga_trend_charts(hist_app_f, is_app=True)
 
 
 # ============== Main ==============
