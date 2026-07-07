@@ -274,6 +274,25 @@ def main():
     drive = _drive_client()
     upload_or_update_csv(drive, OUTPUT_FOLDER_ID, OUTPUT_FILENAME, csv_text)
 
+    # 5. 사이트별 데이터 신선도 검증
+    print("[검증] 사이트별 최신 일자:")
+    from datetime import timezone, timedelta
+    kst_now = datetime.now(timezone(timedelta(hours=9))).date()
+    days_back = (kst_now.weekday() - 6) % 7 or 7
+    last_sunday = kst_now - timedelta(days=days_back)
+    per_site_max = df.groupby('site')['date'].max()
+    missing = []
+    for site, max_date in per_site_max.items():
+        ok = max_date >= last_sunday
+        print(f"  [SITE_MAX] {site}={max_date} {'OK' if ok else 'STALE'}")
+        if not ok:
+            missing.append(f"{site}(최신 {max_date})")
+    print(f"[VERIFY] target=last_sunday={last_sunday}")
+    if missing:
+        print(f"[VERIFY] STALE_SITES={','.join(missing)}")
+    else:
+        print("[VERIFY] ALL_SITES_FRESH")
+
     print(f"[{datetime.now().isoformat(timespec='seconds')}] 통합 완료")
 
 
