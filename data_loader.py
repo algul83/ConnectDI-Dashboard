@@ -532,15 +532,19 @@ def load_ga_history(folder_id: str, limit: int = 200) -> pd.DataFrame:
             rows.extend(parse_ga_bulk_weekly(text))
             continue
 
-        # 정기 주간 파일: 파일명의 YYYYMMDD를 week_start로 사용
-        m = _re.search(r'(\d{8})', f['name'])
-        if not m:
-            continue
-        yyyymmdd = m.group(1)
-        try:
-            week_start = pd.Timestamp(f"{yyyymmdd[:4]}-{yyyymmdd[4:6]}-{yyyymmdd[6:]}").date()
-        except Exception:
-            continue
+        # 정기 주간 파일: 파일 내부의 `# 시작일`을 week_start로 사용
+        # (파일명 컨벤션이 시작일/종료일 혼재해도 안전)
+        if s_date:
+            week_start = s_date
+        else:
+            m = _re.search(r'(\d{8})', f['name'])
+            if not m:
+                continue
+            yyyymmdd = m.group(1)
+            try:
+                week_start = pd.Timestamp(f"{yyyymmdd[:4]}-{yyyymmdd[4:6]}-{yyyymmdd[6:]}").date()
+            except Exception:
+                continue
         parsed = parse_ga_report(text)
 
         def _ch(name: str, source_key: str) -> int:
