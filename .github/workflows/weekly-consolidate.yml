@@ -2,8 +2,10 @@ name: Weekly Consolidate CSV
 
 on:
   schedule:
-    # 매주 월요일 06:00 KST = 일요일 21:00 UTC
-    - cron: '0 21 * * 0'
+    # 매주 월요일 13:47 KST = 월요일 04:47 UTC
+    # raw CSV(stat routine)가 월요일 오전 ~11:30 KST에 Drive에 올라오므로 그 이후에 실행.
+    # (이전 06:00 KST 실행은 raw 업로드 전이라 최신 주가 누락됨)
+    - cron: '47 4 * * 1'
   workflow_dispatch:  # 수동 실행도 가능
 
 jobs:
