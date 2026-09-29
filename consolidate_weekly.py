@@ -1,6 +1,6 @@
 """주 1회 실행 — 3개 사이트 검색 로그 통합 + 보험코드 매핑 적용 + Drive 업로드.
 
-GitHub Actions로 매주 월요일 오후(13:47 KST)에 실행 — raw CSV 업로드(~11:30 KST) 이후.
+GitHub Actions로 매주 수요일 13:00 KST에 실행 — raw CSV 업로드(월 ~11:30 KST) 이후.
 
 처리 흐름:
 1. data_loader.load_all() — 3개 사이트 CSV 통합 (Drive에서 다운로드)
